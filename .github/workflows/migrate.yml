@@ -1,0 +1,40 @@
+name: Supabase Migrate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Apply migrations (true to push, false for dry run)'
+        required: true
+        type: boolean
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Supabase CLI
+        run: |
+          npm install -g supabase@latest
+      - name: Supabase Link
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Apply migrations (or dry run)
+        if: inputs.confirm == true
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+        run: |
+          supabase db push
+      - name: Dry run summary (no changes applied)
+        if: inputs.confirm != true
+        run: |
+          echo "Dry run: set confirm=true to apply migrations via supabase db push"
+
