@@ -1,3 +1,15 @@
+## 2025-09-29  — UI arg-mismatch hardening
+
+- Gradio frontend: consolidated to single source `app/api/gradio_simple_fixed.py` mounted from `app/api/main.py`.
+- Changes:
+  - BASE_URL → same-origin path (`""`) to avoid port/host drift.
+  - Blocks instantiated with `show_api=False`; also guarded via `interface.show_api=False`.
+  - Handler `transcribe_video(url: str, *args, **kwargs)` accepts extra event args injected by Gradio 4.44 to avoid arg-count mismatches.
+  - Queue disabled explicitly `interface.queue(False)`; button `.click(..., queue=False)`.
+- Rationale: Fix “Too many arguments provided for the endpoint” from Gradio frontend (api_info.ts) while keeping server contract stable (`POST /transcribe` expects `{ url }`).
+- No backend endpoint/signature changes; single source of truth: `TranscribeRequest` in `app/api/transcription_routes.py`.
+- Next: Re-deploy Space to propagate front-end config (the warning originates client-side; code fixes require redeploy).
+
 Staging deployment context (Hugging Face Space)
 ---------------------------------------------
 
