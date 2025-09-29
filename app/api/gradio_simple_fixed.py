@@ -6,15 +6,15 @@ import httpx
 import json
 import time
 
-# Use localhost to call the co-mounted FastAPI app within the same Space
-# Avoid hardcoding external hostnames to prevent CORS/arg mismatch issues
-BASE_URL = "http://127.0.0.1:7860"
+# Use same-origin paths to call the co-mounted FastAPI app within the same Space
+# Avoid hardcoding hostnames/ports to prevent CORS and environment mismatches
+BASE_URL = ""
 
 def log_debug(message: str):
     """Log debug message to console"""
     print(f"[DEBUG] {message}")
 
-def transcribe_video(url: str):
+def transcribe_video(url: str, _evt: object | None = None):
     """Transcribe a TikTok video and return the result"""
     log_debug(f"Starting transcription for URL: {url}")
     
@@ -216,8 +216,13 @@ def create_interface():
         - Processing time varies based on video length (usually 30-60 seconds)
         - Results are cached - repeat URLs return instantly
         """)
-    # Disable queue to keep frontend arg schema aligned with function signature
+    # Disable queue and API panel to avoid frontend arg schema mismatches and warnings
     interface.queue(False)
+    try:
+        # Available in recent gradio versions
+        interface.show_api = False
+    except Exception:
+        pass
     return interface
 
 # Create the interface
