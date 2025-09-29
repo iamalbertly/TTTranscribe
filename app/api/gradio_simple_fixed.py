@@ -2,6 +2,7 @@
 Simple Fixed Gradio UI for TTTranscibe - avoids argument mismatch issues
 """
 import gradio as gr
+from collections import deque
 import httpx
 import json
 import time
@@ -10,9 +11,22 @@ import time
 # Relative URLs are not accepted by httpx, so keep explicit scheme/host
 BASE_URL = "http://127.0.0.1:7860"
 
+UI_LOGS: deque[str] = deque(maxlen=1000)
+
 def log_debug(message: str):
     """Log debug message to console"""
     print(f"[DEBUG] {message}")
+    try:
+        UI_LOGS.append(message)
+    except Exception:
+        pass
+
+def read_ui_logs() -> str:
+    """Return recent UI logs as a single string."""
+    try:
+        return "\n".join(list(UI_LOGS)[-400:])
+    except Exception:
+        return ""
 
 def transcribe_video(url: str, *args, **kwargs):
     """Legacy streaming path (kept for compatibility). Returns immediate status and lets timer update."""
@@ -144,6 +158,12 @@ def create_interface():
             interactive=False,
             lines=4
         )
+
+        logs_output = gr.Textbox(
+            label="Server Log (live)",
+            interactive=False,
+            lines=12
+        )
         
         # Connect the button click to the function (immediate response)
         def start_and_store(url: str):
@@ -166,6 +186,12 @@ def create_interface():
 
         # Poller: every 2s update outputs while job_state has a value
         gr.Timer(2.0, fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output])
+
+        # Live logs every 0.5s
+        try:
+            gr.Poll(fn=read_ui_logs, outputs=[logs_output], every=0.5)
+        except Exception:
+            pass
         
         # Add examples
         gr.Examples(
