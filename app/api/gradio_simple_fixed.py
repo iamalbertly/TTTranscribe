@@ -6,9 +6,9 @@ import httpx
 import json
 import time
 
-# Use same-origin paths to call the co-mounted FastAPI app within the same Space
-# Avoid hardcoding hostnames/ports to prevent CORS and environment mismatches
-BASE_URL = ""
+# Use localhost inside the Space container to call the co-mounted FastAPI app
+# Relative URLs are not accepted by httpx, so keep explicit scheme/host
+BASE_URL = "http://127.0.0.1:7860"
 
 def log_debug(message: str):
     """Log debug message to console"""
@@ -155,6 +155,22 @@ def transcribe_video(url: str, *args, **kwargs):
 def create_interface():
     # Avoid kwargs that may not exist across gradio versions
     with gr.Blocks(title="TTTranscibe - TikTok Video Transcriber") as interface:
+        # Enhance console logs in the browser for better diagnosis without changing app logic
+        gr.HTML("""
+<script>
+(function(){
+  const originalWarn = console.warn;
+  console.warn = function(){
+    try{
+      if (arguments && typeof arguments[0] === 'string' && arguments[0].includes('Too many arguments provided for the endpoint')){
+        originalWarn('[TTTranscibe] Note: Gradio UI may pass an extra event arg; backend accepts it.');
+      }
+    }catch(e){}
+    return originalWarn.apply(console, arguments);
+  };
+})();
+</script>
+""")
         gr.Markdown("# 🎵 TTTranscibe - TikTok Video Transcriber")
         gr.Markdown("Transcribe TikTok videos to text using AI. Supports both short URLs (`vm.tiktok.com`) and full TikTok URLs.")
         
