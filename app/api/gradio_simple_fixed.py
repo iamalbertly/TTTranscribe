@@ -15,7 +15,7 @@ def log_debug(message: str):
     print(f"[DEBUG] {message}")
 
 def transcribe_video(url: str, *args, **kwargs):
-    """Transcribe a TikTok video and stream updates so the UI refreshes until done."""
+    """Legacy streaming path (kept for compatibility). Returns immediate status and lets timer update."""
     log_debug(f"Starting transcription for URL: {url}")
 
     if not url or not url.strip():
@@ -39,111 +39,53 @@ def transcribe_video(url: str, *args, **kwargs):
         job_id = job_data.get("id") or job_data.get("job_id")
         if not job_id:
             log_debug("Failed to get job ID from response")
-            yield "❌ Failed to get job ID", "", "", ""
-            return
+            return "❌ Failed to get job ID", "", "", ""
 
         log_debug(f"Job ID: {job_id}")
 
-        # Poll for completion with proper status updates
-        deadline = time.time() + 300  # 5 minutes timeout
-        last_status = ""
-
-        attempt = 0
-        while time.time() < deadline:
-            attempt += 1
-            try:
-                log_debug(f"Polling attempt {attempt} for job {job_id}")
-                with httpx.Client(timeout=30.0) as poll_client:
-                    response = poll_client.get(f"{BASE_URL}/transcribe/{job_id}")
-                    response.raise_for_status()
-                    status_data = response.json()
-                    log_debug(f"Poll response: {json.dumps(status_data, indent=2)}")
-
-                status = status_data.get("status", "UNKNOWN")
-
-                if status != last_status:
-                    log_debug(f"Status changed: {last_status} -> {status}")
-                    last_status = status
-
-                if status == "COMPLETE":
-                    log_debug("✅ TRANSCRIPTION COMPLETED SUCCESSFULLY!")
-
-                    # Get transcript text - check multiple possible locations
-                    transcript_text = ""
-
-                    if status_data.get("text"):
-                        transcript_text = status_data["text"]
-                        log_debug(f"Found transcript in status.text: {len(transcript_text)} characters")
-                    elif status_data.get("data") and status_data["data"].get("text"):
-                        transcript_text = status_data["data"]["text"]
-                        log_debug(f"Found transcript in status.data.text: {len(transcript_text)} characters")
-                    elif status_data.get("result") and status_data["result"].get("text"):
-                        transcript_text = status_data["result"]["text"]
-                        log_debug(f"Found transcript in status.result.text: {len(transcript_text)} characters")
-                    elif status_data.get("text_preview"):
-                        transcript_text = status_data["text_preview"]
-                        log_debug(f"Found transcript in status.text_preview: {len(transcript_text)} characters")
-
-                    if not transcript_text or len(transcript_text) < 50:
-                        log_debug("No transcript text found in main response, trying dedicated endpoint")
-                        try:
-                            with httpx.Client(timeout=30.0) as transcript_client:
-                                transcript_response = transcript_client.get(f"{BASE_URL}/transcript/{job_id}")
-                                log_debug(f"Transcript endpoint status: {transcript_response.status_code}")
-                                if transcript_response.status_code == 200:
-                                    transcript_data = transcript_response.json()
-                                    transcript_text = transcript_data.get("text", transcript_text)
-                                    log_debug(f"Got transcript from dedicated endpoint: {len(transcript_text)} characters")
-                                else:
-                                    log_debug(f"Transcript endpoint failed: {transcript_response.status_code}")
-                        except Exception as e:
-                            log_debug(f"Transcript endpoint error: {e}")
-
-                    audio_url = status_data.get("audio_url", "")
-                    transcript_url = status_data.get("transcript_url", "")
-                    links = ""
-
-                    if audio_url:
-                        if audio_url.startswith("/"):
-                            audio_url = f"{BASE_URL}{audio_url}"
-                        links += f"🎵 **Audio:** [Download]({audio_url})\n"
-                        log_debug(f"Audio URL: {audio_url}")
-
-                    if transcript_url:
-                        if transcript_url.startswith("/"):
-                            transcript_url = f"{BASE_URL}{transcript_url}"
-                        links += f"📝 **Transcript:** [Download]({transcript_url})\n"
-                        log_debug(f"Transcript URL: {transcript_url}")
-
-                    yield "✅ Transcription completed successfully!", transcript_text, links, f"Job ID: {job_id}\nStatus: COMPLETE"
-                    return
-
-                if status == "FAILED":
-                    error_msg = status_data.get("message", "Unknown error")
-                    log_debug(f"❌ TRANSCRIPTION FAILED: {error_msg}")
-                    yield f"❌ Transcription failed: {error_msg}", "", "", f"Job ID: {job_id}\nStatus: FAILED\nError: {error_msg}"
-                    return
-
-                # Still processing → stream a progress update and continue polling
-                remaining = max(0, int(deadline - time.time()))
-                log_debug(f"Status: {status} (Time remaining: {remaining}s)")
-                yield f"⏳ Processing... Status: {status}", "", "", f"Job ID: {job_id}\nStatus: {status}\nAttempt: {attempt}"
-
-            except Exception as e:
-                log_debug(f"Error checking job status: {str(e)}")
-                yield f"❌ Error checking job status: {str(e)}", "", "", f"Job ID: {job_id}\nError: {str(e)}"
-                return
-
-            time.sleep(3)
-
-        log_debug("⏰ Timeout: Transcription took too long")
-        yield "⏰ Timeout: Transcription took too long", "", "", f"Job ID: {job_id}\nStatus: TIMEOUT"
-        return
+        # Return immediately; a background timer will poll and update the UI.
+        return "⏳ Processing... Status: PENDING", "", "", f"Job ID: {job_id}\nStatus: PENDING"
 
     except Exception as e:
         log_debug(f"❌ Error submitting job: {str(e)}")
-        yield f"❌ Error submitting job: {str(e)}", "", "", f"Error: {str(e)}"
-        return
+        return f"❌ Error submitting job: {str(e)}", "", "", f"Error: {str(e)}"
+
+
+def poll_job(job_id: str | None):
+    """Poll job status by id and return UI fields. Safe if job_id is empty."""
+    try:
+        if not job_id:
+            return gr.update(), gr.update(), gr.update(), gr.update()
+
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(f"{BASE_URL}/transcribe/{job_id}")
+            if r.status_code >= 400:
+                return f"❌ Error checking job: HTTP {r.status_code}", "", "", f"Job ID: {job_id}\nHTTP: {r.status_code}"
+            data = r.json()
+
+        status = data.get("status", "UNKNOWN")
+        if status == "COMPLETE":
+            text = data.get("text") or data.get("data", {}).get("text") or data.get("result", {}).get("text") or data.get("text_preview", "")
+            audio_url = data.get("audio_url", "")
+            transcript_url = data.get("transcript_url", "")
+            links = ""
+            if audio_url:
+                if audio_url.startswith("/"):
+                    audio_url = f"{BASE_URL}{audio_url}"
+                links += f"🎵 **Audio:** [Download]({audio_url})\n"
+            if transcript_url:
+                if transcript_url.startswith("/"):
+                    transcript_url = f"{BASE_URL}{transcript_url}"
+                links += f"📝 **Transcript:** [Download]({transcript_url})\n"
+            return "✅ Transcription completed successfully!", text or "", links, f"Job ID: {job_id}\nStatus: COMPLETE"
+
+        if status == "FAILED":
+            message = data.get("message", "unknown error")
+            return f"❌ Transcription failed: {message}", "", "", f"Job ID: {job_id}\nStatus: FAILED\nError: {message}"
+
+        return f"⏳ Processing... Status: {status}", gr.update(), gr.update(), f"Job ID: {job_id}\nStatus: {status}"
+    except Exception as e:
+        return f"❌ Poll error: {e}", "", "", f"Error: {e}"
 
 def create_interface():
     # Avoid kwargs that may not exist across gradio versions
@@ -174,6 +116,9 @@ def create_interface():
                 lines=1
             )
             submit_btn = gr.Button("🎵 Transcribe", variant="primary")
+
+        # Hidden state for job id to drive the polling timer
+        job_state = gr.State("")
         
         status_output = gr.Textbox(
             label="Status",
@@ -200,13 +145,27 @@ def create_interface():
             lines=4
         )
         
-        # Connect the button click to the function
+        # Connect the button click to the function (immediate response)
+        def start_and_store(url: str):
+            s, t, l, d = transcribe_video(url)
+            # Extract job id from details string if present
+            job_id = ""
+            try:
+                if d and "Job ID:" in d:
+                    job_id = d.split("Job ID:")[1].split("\n")[0].strip()
+            except Exception:
+                pass
+            return s, t, l, d, job_id
+
         submit_btn.click(
-            fn=transcribe_video,
+            fn=start_and_store,
             inputs=[url_input],
-            outputs=[status_output, transcript_output, links_output, details_output],
+            outputs=[status_output, transcript_output, links_output, details_output, job_state],
             queue=False
         )
+
+        # Poller: every 2s update outputs while job_state has a value
+        gr.Timer(2.0, fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output])
         
         # Add examples
         gr.Examples(
