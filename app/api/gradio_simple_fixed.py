@@ -154,7 +154,7 @@ def transcribe_video(url: str, *args, **kwargs):
 
 def create_interface():
     # Avoid kwargs that may not exist across gradio versions
-    with gr.Blocks(title="TTTranscibe - TikTok Video Transcriber", show_api=False) as interface:
+    with gr.Blocks(title="TTTranscibe - TikTok Video Transcriber") as interface:
         gr.Markdown("# 🎵 TTTranscibe - TikTok Video Transcriber")
         gr.Markdown("Transcribe TikTok videos to text using AI. Supports both short URLs (`vm.tiktok.com`) and full TikTok URLs.")
         
