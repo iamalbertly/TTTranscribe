@@ -130,6 +130,7 @@ def create_interface():
                 lines=1
             )
             submit_btn = gr.Button("🎵 Transcribe", variant="primary")
+            refresh_btn = gr.Button("Refresh Status")
 
         # Hidden state for job id to drive the polling timer
         job_state = gr.State("")
@@ -185,7 +186,15 @@ def create_interface():
         )
 
         # Poller: every 2s update outputs while job_state has a value
-        gr.Timer(2.0, fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output])
+        gr.Timer(interval=2.0, fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output])
+
+        # Manual refresh fallback
+        refresh_btn.click(
+            fn=poll_job,
+            inputs=[job_state],
+            outputs=[status_output, transcript_output, links_output, details_output],
+            queue=False
+        )
 
         # Live logs every 0.5s
         try:
