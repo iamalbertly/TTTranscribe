@@ -74,27 +74,3 @@ class SupabaseStorage:
         return f"{base}/storage/v1/object/public/{bucket}/{object_name}"
 
 
-# Xet storage integration for better performance
-def get_storage():
-    """
-    Get the appropriate storage backend based on environment configuration
-    """
-    import os
-    from .storage_xet import XetStorage
-    from .storage_hf_dataset import HFDatasetStorage
-    
-    backend = os.getenv("TRANSCRIPT_STORAGE", "xet")
-    
-    if backend == "xet":
-        try:
-            return XetStorage()
-        except Exception as e:
-            logger.warning(f"Xet storage failed, falling back to HF dataset: {e}")
-            return HFDatasetStorage()
-    elif backend == "hf-dataset":
-        return HFDatasetStorage()
-    else:
-        # Default to SupabaseStorage for backward compatibility
-        return SupabaseStorage()
-
-

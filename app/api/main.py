@@ -277,6 +277,10 @@ async def transcribe_endpoint(req: TranscribeRequest) -> Dict[str, Any]:
     try:
         return await start_transcription(req, state)
     except Exception as e:
+        # Allow FastAPI HTTPExceptions (e.g., 429 rate limit) to propagate with their status code
+        from fastapi import HTTPException
+        if isinstance(e, HTTPException):
+            raise
         # Provide a stable error body instead of empty 500s during development
         from fastapi.responses import JSONResponse
         logger.exception("transcribe submit failed", extra={"component": "api", "job_id": "submit"})
