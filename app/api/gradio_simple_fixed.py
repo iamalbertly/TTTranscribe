@@ -7,9 +7,13 @@ import httpx
 import json
 import time
 
-# Use localhost inside the Space container to call the co-mounted FastAPI app
-# Relative URLs are not accepted by httpx, so keep explicit scheme/host
-BASE_URL = "http://127.0.0.1:7860"
+# Route API calls through the in-process FastAPI app to avoid hardcoded hosts
+try:
+    from app.api.main import app as _fastapi_app
+    _asgi_transport = httpx.ASGITransport(app=_fastapi_app)
+except Exception:
+    _fastapi_app = None
+    _asgi_transport = None
 
 UI_LOGS: deque[str] = deque(maxlen=1000)
 
@@ -38,11 +42,15 @@ def transcribe_video(url: str, *args, **kwargs):
         return
 
     try:
-        # Submit the job
-        log_debug(f"Submitting job to {BASE_URL}/transcribe")
-        with httpx.Client(timeout=60.0) as client:
+        # Submit the job via in-process transport (same-origin)
+        log_debug("Submitting job to /transcribe")
+        client_kwargs = {"timeout": 60.0}
+        if _asgi_transport is not None:
+            client_kwargs["transport"] = _asgi_transport
+            client_kwargs["base_url"] = "http://local"
+        with httpx.Client(**client_kwargs) as client:
             response = client.post(
-                f"{BASE_URL}/transcribe",
+                "/transcribe",
                 json={"url": url.strip()},
                 headers={"Content-Type": "application/json"}
             )
@@ -71,8 +79,12 @@ def poll_job(job_id: str | None):
         if not job_id:
             return gr.update(), gr.update(), gr.update(), gr.update()
 
-        with httpx.Client(timeout=30.0) as client:
-            r = client.get(f"{BASE_URL}/transcribe/{job_id}")
+        client_kwargs = {"timeout": 30.0}
+        if _asgi_transport is not None:
+            client_kwargs["transport"] = _asgi_transport
+            client_kwargs["base_url"] = "http://local"
+        with httpx.Client(**client_kwargs) as client:
+            r = client.get(f"/transcribe/{job_id}")
             if r.status_code >= 400:
                 return f"❌ Error checking job: HTTP {r.status_code}", "", "", f"Job ID: {job_id}\nHTTP: {r.status_code}"
             data = r.json()
@@ -84,12 +96,8 @@ def poll_job(job_id: str | None):
             transcript_url = data.get("transcript_url", "")
             links = ""
             if audio_url:
-                if audio_url.startswith("/"):
-                    audio_url = f"{BASE_URL}{audio_url}"
                 links += f"🎵 **Audio:** [Download]({audio_url})\n"
             if transcript_url:
-                if transcript_url.startswith("/"):
-                    transcript_url = f"{BASE_URL}{transcript_url}"
                 links += f"📝 **Transcript:** [Download]({transcript_url})\n"
             return "✅ Transcription completed successfully!", text or "", links, f"Job ID: {job_id}\nStatus: COMPLETE"
 
