@@ -1,97 +1,65 @@
 """
-Simple Fixed Gradio UI for TTTranscibe - avoids argument mismatch issues
+Simple Fixed Gradio UI for TTTranscibe - Final Corrected Version
 """
 import gradio as gr
-from collections import deque
 import httpx
-import json
-import time
+import os
 
-# Route API calls through the in-process FastAPI app to avoid hardcoded hosts
-try:
-    from app.api.main import app as _fastapi_app
-    _asgi_transport = httpx.ASGITransport(app=_fastapi_app)
-except Exception:
-    _fastapi_app = None
-    _asgi_transport = None
+# Use loopback HTTP to call the co-hosted FastAPI app. This is the most reliable method.
+PORT = os.environ.get("PORT", "7860")
+BASE_URL = f"http://127.0.0.1:{PORT}"
 
-UI_LOGS: deque[str] = deque(maxlen=1000)
 
-def log_debug(message: str):
-    """Log debug message to console"""
-    print(f"[DEBUG] {message}")
-    try:
-        UI_LOGS.append(message)
-    except Exception:
-        pass
-
-def read_ui_logs() -> str:
-    """Return recent UI logs as a single string."""
-    try:
-        return "\n".join(list(UI_LOGS)[-400:])
-    except Exception:
-        return ""
-
-def transcribe_video(url: str, *args, **kwargs):
-    """Legacy streaming path (kept for compatibility). Returns immediate status and lets timer update."""
-    log_debug(f"Starting transcription for URL: {url}")
-
+def submit_transcription_job(url: str):
+    """
+    Handles the button click, submits the job, and returns state for the UI.
+    Always returns a 5-tuple: (status, transcript, links_md, details, job_id)
+    """
     if not url or not url.strip():
-        log_debug("No URL provided")
-        yield "❌ Please provide a TikTok URL", "", "", ""
-        return
+        return "❌ Please provide a TikTok URL", "", "", "Error: No URL provided", ""
 
     try:
-        # Submit the job via in-process transport (same-origin)
-        log_debug("Submitting job to /transcribe")
-        client_kwargs = {"timeout": 60.0}
-        if _asgi_transport is not None:
-            client_kwargs["transport"] = _asgi_transport
-            client_kwargs["base_url"] = "http://local"
-        with httpx.Client(**client_kwargs) as client:
+        with httpx.Client(timeout=60.0) as client:
             response = client.post(
-                "/transcribe",
+                f"{BASE_URL}/transcribe",
                 json={"url": url.strip()},
                 headers={"Content-Type": "application/json"}
             )
             response.raise_for_status()
             job_data = response.json()
-            log_debug(f"Job submission response: {json.dumps(job_data, indent=2)}")
 
         job_id = job_data.get("id") or job_data.get("job_id")
         if not job_id:
-            log_debug("Failed to get job ID from response")
-            return "❌ Failed to get job ID", "", "", ""
+            return "❌ Failed to get job ID from response", "", "", "Error: No job_id in response", ""
 
-        log_debug(f"Job ID: {job_id}")
+        status_message = "⏳ Processing... Status: PENDING"
+        details_message = f"Job ID: {job_id}\nStatus: PENDING"
+        return status_message, "", "", details_message, job_id
 
-        # Return immediately; a background timer will poll and update the UI.
-        return "⏳ Processing... Status: PENDING", "", "", f"Job ID: {job_id}\nStatus: PENDING"
-
+    except httpx.RequestError as e:
+        error_message = f"❌ Network error submitting job: {e}"
+        return error_message, "", "", error_message, ""
     except Exception as e:
-        log_debug(f"❌ Error submitting job: {str(e)}")
-        return f"❌ Error submitting job: {str(e)}", "", "", f"Error: {str(e)}"
+        error_message = f"❌ An unexpected error occurred: {str(e)}"
+        return error_message, "", "", error_message, ""
 
 
-def poll_job(job_id: str | None):
-    """Poll job status by id and return UI fields. Safe if job_id is empty."""
+def poll_job_status(job_id: str | None):
+    """Polls the job status by its ID and returns updates for the UI fields."""
+    if not job_id:
+        return gr.update(), gr.update(), gr.update(), gr.update()
+
     try:
-        if not job_id:
-            return gr.update(), gr.update(), gr.update(), gr.update()
-
-        client_kwargs = {"timeout": 30.0}
-        if _asgi_transport is not None:
-            client_kwargs["transport"] = _asgi_transport
-            client_kwargs["base_url"] = "http://local"
-        with httpx.Client(**client_kwargs) as client:
-            r = client.get(f"/transcribe/{job_id}")
-            if r.status_code >= 400:
-                return f"❌ Error checking job: HTTP {r.status_code}", "", "", f"Job ID: {job_id}\nHTTP: {r.status_code}"
+        with httpx.Client(timeout=30.0) as client:
+            r = client.get(f"{BASE_URL}/transcribe/{job_id}")
+            r.raise_for_status()
             data = r.json()
 
         status = data.get("status", "UNKNOWN")
+        details_text = f"Job ID: {job_id}\nStatus: {status}"
+
         if status == "COMPLETE":
-            text = data.get("text") or data.get("data", {}).get("text") or data.get("result", {}).get("text") or data.get("text_preview", "")
+            text = data.get("text") or data.get("data", {}).get("text", "")
             audio_url = data.get("audio_url", "")
             transcript_url = data.get("transcript_url", "")
             links = ""
@@ -99,149 +67,74 @@ def poll_job(job_id: str | None):
                 links += f"🎵 **Audio:** [Download]({audio_url})\n"
             if transcript_url:
                 links += f"📝 **Transcript:** [Download]({transcript_url})\n"
-            return "✅ Transcription completed successfully!", text or "", links, f"Job ID: {job_id}\nStatus: COMPLETE"
+            return "✅ Transcription successful!", text, links, details_text
 
-        if status == "FAILED":
-            message = data.get("message", "unknown error")
-            return f"❌ Transcription failed: {message}", "", "", f"Job ID: {job_id}\nStatus: FAILED\nError: {message}"
+        elif status == "FAILED":
+            message = data.get("message", "Unknown error")
+            details_text += f"\nError: {message}"
+            return f"❌ Transcription failed: {message}", "", "", details_text
 
-        return f"⏳ Processing... Status: {status}", gr.update(), gr.update(), f"Job ID: {job_id}\nStatus: {status}"
+        else:  # PENDING, FETCHING, etc.
+            return f"⏳ Processing... Status: {status}", gr.update(), gr.update(), details_text
+
     except Exception as e:
-        return f"❌ Poll error: {e}", "", "", f"Error: {e}"
+        error_text = f"❌ Error polling job: {e}"
+        return error_text, "", "", error_text
+
 
 def create_interface():
-    # Avoid kwargs that may not exist across gradio versions
     with gr.Blocks(title="TTTranscibe - TikTok Video Transcriber") as interface:
-        # Enhance console logs in the browser for better diagnosis without changing app logic
-        gr.HTML("""
-<script>
-(function(){
-  const originalWarn = console.warn;
-  console.warn = function(){
-    try{
-      if (arguments && typeof arguments[0] === 'string' && arguments[0].includes('Too many arguments provided for the endpoint')){
-        originalWarn('[TTTranscibe] Note: Gradio UI may pass an extra event arg; backend accepts it.');
-      }
-    }catch(e){}
-    return originalWarn.apply(console, arguments);
-  };
-})();
-</script>
-""")
         gr.Markdown("# 🎵 TTTranscibe - TikTok Video Transcriber")
-        gr.Markdown("Transcribe TikTok videos to text using AI. Supports both short URLs (`vm.tiktok.com`) and full TikTok URLs.")
+        gr.Markdown("Enter a TikTok URL to transcribe it. Results are cached for speed.")
         
         with gr.Row():
-            url_input = gr.Textbox(
-                label="TikTok URL",
-                placeholder="https://vm.tiktok.com/... or https://www.tiktok.com/@user/video/...",
-                lines=1
-            )
+            url_input = gr.Textbox(label="TikTok URL", placeholder="e.g., https://www.tiktok.com/@user/video/...", lines=1)
             submit_btn = gr.Button("🎵 Transcribe", variant="primary")
-            refresh_btn = gr.Button("Refresh Status")
 
-        # Hidden state for job id to drive the polling timer
+        # Hidden state to store the current job_id for polling
         job_state = gr.State("")
         
-        status_output = gr.Textbox(
-            label="Status",
-            interactive=False,
-            lines=2,
-            value="⏳ Ready to transcribe"
-        )
-        
-        transcript_output = gr.Textbox(
-            label="📝 Transcription Result",
-            interactive=False,
-            lines=10,
-            max_lines=20,
-            placeholder="Transcription will appear here..."
-        )
-        
-        links_output = gr.Markdown(
-            value="Files will appear here after transcription completes"
-        )
-        
-        details_output = gr.Textbox(
-            label="Job Details",
-            interactive=False,
-            lines=4
-        )
-
-        logs_output = gr.Textbox(
-            label="Server Log (live)",
-            interactive=False,
-            lines=12
-        )
-        
-        # Connect the button click to the function (immediate response)
-        def start_and_store(url: str):
-            s, t, l, d = transcribe_video(url)
-            # Extract job id from details string if present
-            job_id = ""
-            try:
-                if d and "Job ID:" in d:
-                    job_id = d.split("Job ID:")[1].split("\n")[0].strip()
-            except Exception:
-                pass
-            return s, t, l, d, job_id
+        status_output = gr.Textbox(label="Status", interactive=False, lines=1, value="⏳ Ready")
+        transcript_output = gr.Textbox(label="📝 Transcription", interactive=False, lines=10, placeholder="Transcription will appear here...")
+        links_output = gr.Markdown("Download links will appear here.")
+        details_output = gr.Textbox(label="Job Details", interactive=False, lines=4)
 
         submit_btn.click(
-            fn=start_and_store,
+            fn=submit_transcription_job,
             inputs=[url_input],
             outputs=[status_output, transcript_output, links_output, details_output, job_state],
             queue=False
         )
 
-        # Poller: every 2s update outputs while job_state has a value
+        # Version-agnostic polling: prefer Poll, fallback to Timer signatures
         try:
-            gr.Poll(fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output], every=2.0)
+            gr.Poll(
+                fn=poll_job_status,
+                inputs=[job_state],
+                outputs=[status_output, transcript_output, links_output, details_output],
+                every=2.0
+            )
         except Exception:
-            # Fallback for older/newer versions where Poll signature differs
             try:
-                gr.Poll(poll_job, [job_state], [status_output, transcript_output, links_output, details_output], every=2.0)
+                gr.Timer(
+                    fn=poll_job_status,
+                    inputs=[job_state],
+                    outputs=[status_output, transcript_output, links_output, details_output],
+                    every=2.0
+                )
             except Exception:
-                pass
+                try:
+                    gr.Timer(2.0, poll_job_status, [job_state], [status_output, transcript_output, links_output, details_output])
+                except Exception:
+                    pass
 
-        # Manual refresh fallback
-        refresh_btn.click(
-            fn=poll_job,
-            inputs=[job_state],
-            outputs=[status_output, transcript_output, links_output, details_output],
-            queue=False
-        )
-
-        # Live logs every 0.5s
-        try:
-            gr.Poll(fn=read_ui_logs, outputs=[logs_output], every=0.5)
-        except Exception:
-            pass
-        
-        # Add examples
         gr.Examples(
-            examples=[
-                ["https://vm.tiktok.com/ZMADQVF4e/"],
-                ["https://vm.tiktok.com/ZMAPTWV7o/"],
-                ["https://www.tiktok.com/@businesssapience/video/7298871837335883050?lang=en"]
-            ],
-            inputs=[url_input],
-            label="📋 Try these example URLs"
+            examples=[["https://www.tiktok.com/@businesssapience/video/7298871837335883050"]],
+            inputs=[url_input]
         )
-        
-        gr.Markdown("""
-        **💡 Tips:**
-        - Supports both short (`vm.tiktok.com`) and full TikTok URLs
-        - Processing time varies based on video length (usually 30-60 seconds)
-        - Results are cached - repeat URLs return instantly
-        """)
-    # Disable queue and API panel to avoid frontend arg schema mismatches and warnings
+    
     interface.queue(False)
-    try:
-        # Available in recent gradio versions
-        interface.show_api = False
-    except Exception:
-        pass
     return interface
 
-# Create the interface
+# Create the final interface instance
 simple_fixed_interface = create_interface()
