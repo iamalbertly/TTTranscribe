@@ -45,40 +45,61 @@ def submit_transcription_job(url: str):
 
 
 def poll_job_status(job_id: str | None):
-    """Polls the job status by its ID and returns updates for the UI fields."""
+    """
+    Polls the job status and, upon completion, fetches the transcript content.
+    Returns a 4-tuple (status_text, transcript_text, links_md, details_text).
+    """
     if not job_id:
         return gr.update(), gr.update(), gr.update(), gr.update()
 
     try:
         with httpx.Client(timeout=30.0) as client:
-            r = client.get(f"{BASE_URL}/transcribe/{job_id}")
+            # 1) Get job status
+            status_url = f"{BASE_URL}/transcribe/{job_id}"
+            r = client.get(status_url)
             r.raise_for_status()
             data = r.json()
 
-        status = data.get("status", "UNKNOWN")
-        details_text = f"Job ID: {job_id}\nStatus: {status}"
+            status = data.get("status", "UNKNOWN")
+            details_text = f"Job ID: {job_id}\nStatus: {status}"
 
-        if status == "COMPLETE":
-            text = data.get("text") or data.get("data", {}).get("text", "")
-            audio_url = data.get("audio_url", "")
-            transcript_url = data.get("transcript_url", "")
-            links = ""
-            if audio_url:
-                links += f"🎵 **Audio:** [Download]({audio_url})\n"
-            if transcript_url:
-                links += f"📝 **Transcript:** [Download]({transcript_url})\n"
-            return "✅ Transcription successful!", text, links, details_text
+            if status == "COMPLETE":
+                transcript_url = data.get("transcript_url")
+                if not transcript_url:
+                    return "❌ Error: Job complete but no transcript URL found.", "", "", details_text
 
-        elif status == "FAILED":
-            message = data.get("message", "Unknown error")
-            details_text += f"\nError: {message}"
-            return f"❌ Transcription failed: {message}", "", "", details_text
+                # 2) Fetch the transcript JSON
+                final_transcript_url = f"{BASE_URL}{transcript_url}" if transcript_url.startswith("/") else transcript_url
+                trr = client.get(final_transcript_url)
+                trr.raise_for_status()
+                try:
+                    transcript_data = trr.json()
+                    final_text = transcript_data.get("text", "Error: Could not find text in transcript file.")
+                except Exception:
+                    # If not JSON, try raw text
+                    final_text = trr.text or ""
 
-        else:  # PENDING, FETCHING, etc.
-            return f"⏳ Processing... Status: {status}", gr.update(), gr.update(), details_text
+                audio_url = data.get("audio_url", "")
+                links = ""
+                if audio_url:
+                    links += f"🎵 **Audio:** [Download]({BASE_URL + audio_url if audio_url.startswith('/') else audio_url})\n"
+                if transcript_url:
+                    links += f"📝 **Transcript:** [Download]({final_transcript_url})\n"
+                return "✅ Transcription successful!", final_text, links, details_text
 
+            if status == "FAILED":
+                message = data.get("message", "Unknown error")
+                details_text += f"\nError: {message}"
+                return f"❌ Transcription failed: {message}", "", "", details_text
+
+            # Progress statuses
+            return f"⏳ Progress: {status}", gr.update(), gr.update(), details_text
+
+    except httpx.RequestError as e:
+        error_text = f"❌ Network error while polling: {e}"
+        return error_text, "", "", error_text
     except Exception as e:
-        error_text = f"❌ Error polling job: {e}"
+        error_text = f"❌ Unexpected error while polling: {e}"
         return error_text, "", "", error_text
 
 
