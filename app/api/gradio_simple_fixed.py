@@ -194,7 +194,14 @@ def create_interface():
         )
 
         # Poller: every 2s update outputs while job_state has a value
-        gr.Timer(interval=2.0, fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output])
+        try:
+            gr.Poll(fn=poll_job, inputs=[job_state], outputs=[status_output, transcript_output, links_output, details_output], every=2.0)
+        except Exception:
+            # Fallback for older/newer versions where Poll signature differs
+            try:
+                gr.Poll(poll_job, [job_state], [status_output, transcript_output, links_output, details_output], every=2.0)
+            except Exception:
+                pass
 
         # Manual refresh fallback
         refresh_btn.click(

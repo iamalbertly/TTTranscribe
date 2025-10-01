@@ -357,16 +357,20 @@ async def repair_stuck_jobs_endpoint() -> Dict[str, Any]:
 # Removed obsolete transcribeOrGet endpoint from previous merge to avoid duplication and broken refs
 
 
+@app.get("/ping", tags=["Health"])
+async def ping() -> Dict[str, Any]:
+    return {"status": "ok", "message": "pong"}
+
 # Mount Gradio UI for Hugging Face Space
 try:
     import gradio as gr
-    # Use the simple fixed interface as the single source of truth to avoid arg mismatches
     from .gradio_simple_fixed import simple_fixed_interface
-    # Ensure Gradio is mounted at root and avoid extra arguments via queue/API panel
     app = gr.mount_gradio_app(app, simple_fixed_interface, path="/")
-    logger.info("Gradio transcription UI mounted successfully")
+    logger.info("Gradio transcription UI mounted successfully at root '/'")
 except Exception as e:
-    # If mounting fails, log but don't break the API
-    logger.warning(f"Failed to mount Gradio UI: {e}")
-    pass
+    logger.critical(
+        f"CRITICAL: Gradio UI failed to mount, app will not be usable. Error: {e}",
+        exc_info=True,
+    )
+    raise e
 

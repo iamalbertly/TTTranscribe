@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (ffmpeg required for audio processing)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -65,5 +65,5 @@ ENV HOME=/tmp
 # Expose port
 EXPOSE 7860
 
-# Run the application
-CMD ["python", "app.py"]
+# Run the application directly via uvicorn
+CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "7860"]
