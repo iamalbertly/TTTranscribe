@@ -50,6 +50,35 @@ Key modules:
 - app/store/db.py → asyncpg pool, schema, upsert_job
 - app/store/storage.py → Supabase Storage upload REST
 
+Dependency map (concise, single source of truth)
+- API: `fastapi`, `uvicorn`, `pydantic`
+- Media: `yt-dlp` (invoked via `python -m yt_dlp`), `ffmpeg-python` (requires system ffmpeg/ffprobe)
+- ASR: `openai-whisper` with Torch CPU; model prewarmed under `whisper_models_cache`
+- IO/HTTP: `httpx`
+- DB: `asyncpg` (production), in-memory store when `DATABASE_URL=memory://*`
+- UI: `gradio` mounted at `/` from `app/api/gradio_simple_fixed.py`
+
+Naming conventions (enforced moving forward)
+- Files reflect purpose and module (no duplicates). Example: `api/transcription_routes.py` (SSoT for request/response contract)
+- Helper modules by concern: `services/*`, `store/*`, `core/*`, `utils/*`
+- Avoid parallel implementations; consolidate into canonical module and re-export from `app/api/routes.py` when needed
+- Mark frozen artifacts with suffix `_vX.Y_frozen` only when explicitly required (none currently)
+
+Duplication/circulars status
+- Legacy Gradio variants removed; canonical UI is `gradio_simple_fixed.py`
+- Route callables consolidated under `app/api/routes.py`; no broken references detected
+- Store split: `core_db.py` (connection/mode) + `db_operations.py` (CRUD) + `job_manager.py` (lifecycle) + `db.py` (facade)
+- No circular imports found across `api/services/store`
+
+Operational notes
+- Default dev/test use `DATABASE_URL=memory://*` to avoid asyncpg build issues
+- Health, queue, and lease stats surfaced via `GET /health`
+- Static mounts in dev at `/files/audio` and `/files/transcripts`
+
+Line-length/size guardrails
+- Aim to keep important files under 300 LOC; split by logical concern if exceeded
+
+Last validated: 2025-10-01
 Naming convention: module files reflect purpose; avoid duplicates; frozen marker not used yet.
 
 Recent fixes:
