@@ -616,14 +616,18 @@ function Test-BuildIsLive {
     }
   } catch {}
   $dispFinal = if ($finalSha) { $finalSha } else { 'missing' }
-  if (-not $finalPayload.build -or -not $finalPayload.build.git_sha) {
+  if (-not $finalPayload -or -not ($finalPayload.PSObject.Properties.Name -contains 'build') -or -not $finalPayload.build -or -not ($finalPayload.build.PSObject.Properties.Name -contains 'git_sha')) {
     Write-Error "Health missing build.git_sha"
   } elseif ($finalPayload.build.git_sha -eq "unknown") {
-    Write-Error "Deployed build git_sha is 'unknown' – build stamping not working"
+    Write-Error "Deployed build git_sha is 'unknown' - build stamping not working"
   } else {
     Write-Error ("Deployed build {0} != local {1}" -f $finalPayload.build.git_sha, $target)
   }
-  Write-Error ("New build not live after {0} attempts ({1}s interval). Last /health: {2}" -f $maxAttempts, 60, ($finalPayload | ConvertTo-Json -Depth 3))
+  $interval = 60
+  Write-Error ("New build not live after {0} attempts" -f $maxAttempts)
+  Write-Error ("Interval: {0} sec" -f $interval)
+  Write-Error ("Expected={0}, Actual={1}" -f $target, $dispFinal)
+  Write-Error ("Last /health: {0}" -f ($finalPayload | ConvertTo-Json -Depth 3))
   return $false
 }
 
