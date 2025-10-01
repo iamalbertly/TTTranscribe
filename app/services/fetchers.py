@@ -160,35 +160,3 @@ async def fetch_media_stage(job_id: str, url: str, db, storage, settings) -> Tup
         await db.update_status(job_id, "MEDIA_READY")
         return data, metadata
 
-
-
-
-async def fetch_tiktok_audio(url: str, job_id: str) -> Tuple[Path, Dict]:
-    """
-    Fetch TikTok audio and return the path to the downloaded file and metadata.
-    This is a wrapper around fetch_media_stage that matches the expected interface.
-    """
-    from app.core.config import get_settings
-    from app.store.db import Database
-    from app.store.storage import SupabaseStorage
-    from httpx import AsyncClient
-    
-    settings = get_settings()
-    db = Database()
-    await db.connect()
-    storage = SupabaseStorage(AsyncClient(timeout=60))
-    
-    try:
-        data, metadata = await fetch_media_stage(job_id, url, db, storage, settings)
-        
-        # Write the data to a temporary file and return the path
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_file:
-            tmp_file.write(data)
-            tmp_path = Path(tmp_file.name)
-        
-        return tmp_path, metadata
-    finally:
-        await db.aclose()
-
-
