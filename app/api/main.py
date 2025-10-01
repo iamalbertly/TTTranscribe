@@ -10,6 +10,9 @@ from typing import Any, Dict
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response, JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -186,6 +189,28 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="tiktok-transcriber-mvp", lifespan=lifespan)
 
+
+class _RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            response: Response = await call_next(request)
+            return response
+        except Exception as e:
+            # Log full traceback for unhandled exceptions
+            logger.error(
+                "unhandled_request_exception",
+                extra={"component": "http", "job_id": "request", "path": request.url.path, "method": request.method, "error": str(e)},
+                exc_info=True,
+            )
+            return JSONResponse(status_code=500, content={
+                "status": "FAILED",
+                "code": "unexpected_error",
+                "message": "Internal server error",
+            })
+
+
+app.add_middleware(_RequestLoggingMiddleware)
+
 # CORS
 settings_for_cors = get_settings()
 origins = [o.strip() for o in (settings_for_cors.cors_origins or "").split(",") if o.strip()]
@@ -270,6 +295,21 @@ async def health() -> Dict[str, Any]:
             "transcribe": transcribe_stats,
         },
     }
+
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    # Ensure any uncaught exception is logged with traceback and a structured body is returned
+    logger.critical(
+        "global_exception",
+        extra={"component": "api", "job_id": "exception", "path": request.url.path, "method": request.method, "error": str(exc)},
+        exc_info=True,
+    )
+    return JSONResponse(status_code=500, content={
+        "status": "FAILED",
+        "code": "unexpected_error",
+        "message": "Internal server error",
+    })
 
 
 @app.post("/transcribe", status_code=202)

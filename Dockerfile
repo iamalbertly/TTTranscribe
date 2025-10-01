@@ -66,4 +66,4 @@ ENV HOME=/tmp
 EXPOSE 7860
 
 # Run the application directly via uvicorn
-CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "7860", "--log-level", "debug"]
