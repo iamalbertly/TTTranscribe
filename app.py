@@ -1,8 +1,16 @@
-import os, sys, json, time, tempfile, subprocess, shlex, traceback
+import os, sys, json, time, tempfile, subprocess, shlex, traceback, hashlib, hmac, uuid
 from collections import deque
+from datetime import datetime, timezone
+from typing import Dict, Optional
 import httpx
 import gradio as gr
 import logging
+from fastapi import FastAPI, HTTPException, Request, Header, Depends
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import asyncio
+from threading import Lock
 
 # ===============  A) Configure logging to reduce noise  =================
 # Set noisy loggers to WARNING level
@@ -34,7 +42,85 @@ logger = UILogHandler("tttranscribe")
 def read_logs():
     return "\n".join(LOGS)
 
-# ===============  C) Helpers  ======================================
+# ===============  C) API Configuration  ======================================
+# API Keys and secrets (in production, load from environment)
+API_KEYS = {
+    "CLIENT_A_KEY_123": "CLIENT_A_SECRET_ABC",
+    # Add more client keys as needed
+}
+
+# Rate limiting: token bucket per API key
+class TokenBucket:
+    def __init__(self, capacity: int, refill_rate: float):
+        self.capacity = capacity
+        self.tokens = capacity
+        self.last_refill = time.time()
+        self.lock = Lock()
+    
+    def consume(self, tokens: int = 1) -> bool:
+        with self.lock:
+            now = time.time()
+            # Refill tokens based on time passed
+            time_passed = now - self.last_refill
+            self.tokens = min(self.capacity, self.tokens + time_passed * self.refill_rate)
+            self.last_refill = now
+            
+            if self.tokens >= tokens:
+                self.tokens -= tokens
+                return True
+            return False
+
+# Rate limiters per API key (5 requests per minute = 1/12 per second)
+rate_limiters: Dict[str, TokenBucket] = {}
+
+def get_rate_limiter(api_key: str) -> TokenBucket:
+    if api_key not in rate_limiters:
+        rate_limiters[api_key] = TokenBucket(capacity=5, refill_rate=1/12)  # 5 per minute
+    return rate_limiters[api_key]
+
+# ===============  D) API Models  ======================================
+class TranscribeRequest(BaseModel):
+    url: str
+
+class TranscribeResponse(BaseModel):
+    request_id: str
+    status: str
+    lang: str
+    duration_sec: float
+    transcript: str
+    transcript_sha256: str
+    source: dict
+    billed_tokens: int
+    elapsed_ms: int
+    ts: str
+
+class ErrorResponse(BaseModel):
+    error: str
+    request_id: Optional[str] = None
+
+# ===============  E) Authentication  ======================================
+def verify_signature(api_key: str, timestamp: int, signature: str, method: str, path: str, body: str) -> bool:
+    """Verify HMAC-SHA256 signature"""
+    if api_key not in API_KEYS:
+        return False
+    
+    secret = API_KEYS[api_key]
+    string_to_sign = f"{method}\n{path}\n{body}\n{timestamp}"
+    expected_signature = hmac.new(
+        secret.encode('utf-8'),
+        string_to_sign.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected_signature)
+
+def verify_timestamp(timestamp: int) -> bool:
+    """Verify timestamp is within 5 minutes of current time"""
+    current_time = int(time.time() * 1000)
+    time_diff = abs(current_time - timestamp)
+    return time_diff <= 300000  # 5 minutes in milliseconds
+
+# ===============  F) Helpers  ======================================
 def expand_tiktok_url(url: str) -> str:
     try:
         # HEAD first, then follow redirects manually to preserve UA and Referer
@@ -126,7 +212,7 @@ def to_wav_normalized(src_path: str, dst_path: str) -> str:
     logger.log("info", "transcode successful", wav=dst_path, wav_size=size, duration=dur)
     return dst_path
 
-# ===============  D) Transcription  =================================
+# ===============  G) Transcription  =================================
 # Use faster-whisper for speed and stability on Spaces CPU
 # Model is downloaded to the ephemeral cache; HF Spaces will cache layers
 try:
@@ -189,11 +275,11 @@ else:
     logger.log("warning", "faster-whisper not available, using mock model for testing")
     _whisper = None
 
-def transcribe_wav(path: str) -> str:
+def transcribe_wav(path: str) -> tuple[str, str, float]:
     logger.log("info", "transcribing", path=path)
     if _whisper is None:
         logger.log("warning", "faster-whisper not available, returning mock transcript")
-        return "Mock transcript: This is a test transcription since faster-whisper is not available."
+        return "Mock transcript: This is a test transcription since faster-whisper is not available.", "en", 0.0
     
     segments, info = _whisper.transcribe(path, beam_size=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500))
     parts = []
@@ -203,9 +289,138 @@ def transcribe_wav(path: str) -> str:
     # Also print the transcript to logs for verification
     logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
     # If you want the full transcript in logs, remove slice [:1000]
-    return text
+    return text, info.language, info.duration
 
-# ===============  E) Gradio UI  =====================================
+# ===============  H) API Processing Function  ======================================
+def process_tiktok_url(url: str) -> TranscribeResponse:
+    """Process TikTok URL and return transcription result"""
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    try:
+        logger.log("info", "processing tiktok url", request_id=request_id, url=url)
+        
+        # Expand URL
+        expanded = expand_tiktok_url(url)
+        
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="tiktok_") as tmpd:
+            # Download audio
+            m4a = yt_dlp_m4a(expanded, tmpd)
+            logger.log("info", "stored locally", request_id=request_id, object=os.path.basename(m4a), path=m4a)
+            
+            # Convert to WAV
+            wav = os.path.join(tmpd, "audio.wav")
+            to_wav_normalized(m4a, wav)
+            
+            # Transcribe
+            transcript, language, duration = transcribe_wav(wav)
+            
+        # Calculate transcript hash
+        transcript_bytes = transcript.encode('utf-8')
+        transcript_sha256 = hashlib.sha256(transcript_bytes).hexdigest()
+        
+        # Extract video ID from URL
+        video_id = "unknown"
+        canonical_url = expanded
+        if "tiktok.com" in expanded and "/video/" in expanded:
+            try:
+                video_id = expanded.split("/video/")[1].split("?")[0]
+            except:
+                pass
+        
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        
+        logger.log("info", "transcription complete", 
+                  request_id=request_id, 
+                  duration=duration, 
+                  language=language,
+                  transcript_length=len(transcript))
+        
+        return TranscribeResponse(
+            request_id=request_id,
+            status="ok",
+            lang=language,
+            duration_sec=duration,
+            transcript=transcript,
+            transcript_sha256=transcript_sha256,
+            source={
+                "canonical_url": canonical_url,
+                "video_id": video_id
+            },
+            billed_tokens=1,
+            elapsed_ms=elapsed_ms,
+            ts=datetime.now(timezone.utc).isoformat()
+        )
+        
+    except subprocess.CalledProcessError as e:
+        logger.log("error", "subprocess failed", request_id=request_id, cmd=e.cmd, code=e.returncode, out=e.stdout)
+        raise HTTPException(status_code=408, detail="Upstream fetch timeout")
+    except Exception as e:
+        logger.log("error", "exception", request_id=request_id, error=str(e), tb=traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ===============  I) FastAPI App  ======================================
+app = FastAPI(title="TTTranscibe API", version="1.0.0")
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/api/transcribe", response_model=TranscribeResponse)
+async def transcribe(
+    request: TranscribeRequest,
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    x_timestamp: int = Header(..., alias="X-Timestamp"),
+    x_signature: str = Header(..., alias="X-Signature")
+):
+    """Transcribe TikTok video to text"""
+    
+    # Verify API key
+    if x_api_key not in API_KEYS:
+        raise HTTPException(status_code=401, detail="Unknown API key")
+    
+    # Verify timestamp
+    if not verify_timestamp(x_timestamp):
+        raise HTTPException(status_code=403, detail="Timestamp skew too large")
+    
+    # Verify signature
+    body_json = request.json()
+    if not verify_signature(x_api_key, x_timestamp, x_signature, "POST", "/api/transcribe", body_json):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    
+    # Check rate limit
+    rate_limiter = get_rate_limiter(x_api_key)
+    if not rate_limiter.consume():
+        # Calculate retry after seconds
+        retry_after = int(60 / rate_limiter.refill_rate)  # seconds until bucket refills
+        response = JSONResponse(
+            status_code=429,
+            content={"error": "Rate limit exceeded"},
+            headers={"Retry-After": str(retry_after)}
+        )
+        return response
+    
+    # Process the request
+    try:
+        result = process_tiktok_url(request.url)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.log("error", "unexpected error", error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+# ===============  J) Gradio UI (Legacy)  ======================================
 def transcribe_url(url: str, progress=gr.Progress()):
     try:
         if not url or not url.strip():
@@ -227,7 +442,7 @@ def transcribe_url(url: str, progress=gr.Progress()):
             to_wav_normalized(m4a, wav)
 
             progress(0.70, desc="Transcribing")
-            text = transcribe_wav(wav)
+            text, _, _ = transcribe_wav(wav)
 
         progress(1.0, desc="Done")
         # Important: print the full transcript into logs so it shows in Space console
@@ -241,6 +456,7 @@ def transcribe_url(url: str, progress=gr.Progress()):
         logger.log("error", "exception", error=str(e), tb=traceback.format_exc())
         return f"[Exception] {e}", "Error"
 
+# Create Gradio interface
 with gr.Blocks(title="TTTranscibe") as demo:
     gr.Markdown("### TikTok → Transcript, with live server logs")
 
@@ -262,5 +478,10 @@ with gr.Blocks(title="TTTranscibe") as demo:
         # If polling fails, just skip the live logs feature
         pass
 
-demo.queue(max_size=8)
-demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)), max_threads=1)
+# Mount Gradio app
+app = gr.mount_gradio_app(app, demo, path="/")
+
+if __name__ == "__main__":
+    import uvicorn
+    demo.queue(max_size=8)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))

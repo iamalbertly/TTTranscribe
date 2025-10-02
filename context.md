@@ -1,53 +1,67 @@
-## 2025-01-27  — MAJOR ARCHITECTURE CHANGE: Synchronous Drop-in Fix
+## 2025-01-27  — MAJOR ARCHITECTURE CHANGE: Public API Implementation
 
-- **COMPLETE REPLACEMENT**: Replaced complex FastAPI + background worker architecture with simple synchronous Gradio app.
-- **New app.py**: Single-file solution that fetches, normalizes, and transcribes TikTok URLs in one synchronous call.
-- **Key changes**:
-  - Removed FastAPI server, background workers, database dependencies
-  - Direct Gradio UI with live server logs
-  - Uses `faster-whisper` instead of `openai-whisper` for better performance
-  - Synchronous processing: URL → fetch → normalize → transcribe → return result
-  - Final transcript printed to container logs with `FINAL_TRANSCRIPT` key
-  - Eliminated all loopback calls to 127.0.0.1
-  - Throttled noisy logs (uvicorn.access, httpx to WARNING)
-- **Dependencies updated**: Pinned gradio==4.44.1, yt-dlp==2024.8.6, faster-whisper==1.0.3
-- **Rationale**: Fixes the core issue where pipeline stops after "normalized audio" and never returns transcript to UI
-- **Result**: TikTok URLs like `https://vm.tiktok.com/ZMAPTWV7o/` now return transcript directly to Gradio UI
+- **NEW PUBLIC API**: Implemented FastAPI-based public API with HMAC-SHA256 authentication and rate limiting.
+- **Dual Interface**: Maintains Gradio UI for direct user interaction while adding REST API for programmatic access.
+- **Key features**:
+  - POST /api/transcribe endpoint with full authentication
+  - HMAC-SHA256 signature verification with timestamp validation
+  - Token bucket rate limiting (5 requests/minute per API key)
+  - Comprehensive error handling with proper HTTP status codes
+  - TikTok URL processing: expand → fetch → normalize → transcribe
+  - Returns structured JSON with transcript, metadata, and billing info
+- **Authentication**: X-API-Key, X-Timestamp, X-Signature headers required
+- **Rate Limiting**: 5 requests per minute per API key with Retry-After headers
+- **Dependencies updated**: Added fastapi==0.104.1, uvicorn==0.24.0, pydantic==2.5.0
+- **Result**: Full public API specification implemented with secure authentication
 
 Staging deployment context (Hugging Face Space)
 ---------------------------------------------
 
-- Runtime: Simple Gradio app with synchronous processing.
-- No CORS needed: Direct Gradio UI without API endpoints.
-- No storage: Transcripts returned directly to UI, no file persistence.
-- UI contract:
+- Runtime: FastAPI + Gradio hybrid with synchronous processing.
+- API endpoints: POST /api/transcribe with full authentication
+- CORS enabled: Supports cross-origin requests for API access
+- Dual interface: REST API for programmatic access + Gradio UI for direct use
+- API contract:
+  - POST /api/transcribe with X-API-Key, X-Timestamp, X-Signature headers
+  - Returns structured JSON with transcript, metadata, billing info
+  - Rate limited: 5 requests/minute per API key
+  - Error responses: 400, 401, 403, 408, 429, 500 with proper status codes
+- UI contract (legacy):
   - Single function: `transcribe_url(url)` → `(transcript_text, status)`
   - Progress updates: "Expanding URL", "Fetching audio", "Converting to WAV", "Transcribing", "Done"
   - Live logs: Ring buffer polled every 500ms for real-time feedback
 - Whisper cache: Model loaded once at startup using `faster-whisper` with int8 quantization.
-- No concurrency limits: Single-threaded processing per request.
+- Concurrency: API requests processed with rate limiting, UI requests single-threaded
 - Deployment files: `Dockerfile`, `space.yaml` (app_port: 7860).
 
 Last updated: 2025-09-21
 
 Project: tiktok-transcriber-mvp (lean monolith)
 
-Dependency map (NEW SIMPLIFIED ARCHITECTURE):
-- gradio → Direct UI with live logging
+Dependency map (NEW API ARCHITECTURE):
+- fastapi → REST API with authentication and rate limiting
+- gradio → Direct UI with live logging (mounted on FastAPI)
 - yt-dlp → TikTok fetch to audio (m4a) via subprocess
 - faster-whisper → CPU transcription (medium model, int8)
 - httpx → URL expansion and HTTP requests
 - ffmpeg/ffprobe → Audio normalization (system binaries)
 - tempfile → Temporary file handling
+- hmac/hashlib → HMAC-SHA256 signature verification
+- uvicorn → ASGI server for FastAPI
 
-Key modules (NEW ARCHITECTURE):
-- app.py → Single-file Gradio app with synchronous processing
+Key modules (NEW API ARCHITECTURE):
+- app.py → FastAPI + Gradio hybrid with synchronous processing
+  - FastAPI app → POST /api/transcribe endpoint with full authentication
+  - TokenBucket → Rate limiting implementation
+  - verify_signature() → HMAC-SHA256 signature verification
+  - process_tiktok_url() → Main API processing function
   - UILogHandler → Live logging to console + UI
   - expand_tiktok_url() → URL expansion with proper headers
   - yt_dlp_m4a() → Audio download via yt-dlp subprocess
   - to_wav_normalized() → FFmpeg audio conversion
   - transcribe_wav() → faster-whisper transcription
-  - transcribe_url() → Main processing function with progress
+  - transcribe_url() → Legacy UI processing function
+- test_api.py → API testing script with curl example
 - Legacy modules (REMOVED):
   - app/api/* → FastAPI routes and Gradio mounting (deleted)
   - app/services/* → Background processing services (deleted)
