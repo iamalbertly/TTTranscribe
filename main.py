@@ -357,7 +357,9 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
         raise HTTPException(status_code=408, detail="Upstream fetch timeout")
     except Exception as e:
         logger.log("error", "exception", request_id=request_id, error=str(e), tb=traceback.format_exc())
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # Return more specific error information for debugging
+        error_detail = f"Processing error: {str(e)}"
+        raise HTTPException(status_code=500, detail=error_detail)
 
 # ===============  I) FastAPI App  ======================================
 app = FastAPI(title="TTTranscibe API", version="1.0.0")

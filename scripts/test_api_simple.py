@@ -13,7 +13,7 @@ import json
 import requests
 import argparse
 
-def test_api_quick(environment="auto", test_url="https://vm.tiktok.com/ZMAPTWV7o/"):
+def test_api_quick(environment="auto", test_url="https://www.tiktok.com/@its.factsonly/video/7554590723895594258"):
     """Quick API test"""
     
     # Environment detection
@@ -94,7 +94,7 @@ def main():
     parser = argparse.ArgumentParser(description="Quick TTTranscibe API test")
     parser.add_argument("--env", choices=["local", "remote", "auto"], default="auto",
                        help="Environment to test (default: auto-detect)")
-    parser.add_argument("--url", default="https://vm.tiktok.com/ZMAPTWV7o/",
+    parser.add_argument("--url", default="https://www.tiktok.com/@its.factsonly/video/7554590723895594258",
                        help="TikTok URL to test with")
     
     args = parser.parse_args()
