@@ -281,15 +281,20 @@ def transcribe_wav(path: str) -> tuple[str, str, float]:
         logger.log("warning", "faster-whisper not available, returning mock transcript")
         return "Mock transcript: This is a test transcription since faster-whisper is not available.", "en", 0.0
     
-    segments, info = _whisper.transcribe(path, beam_size=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500))
-    parts = []
-    for seg in segments:
-        parts.append(seg.text.strip())
-    text = " ".join(p for p in parts if p)
-    # Also print the transcript to logs for verification
-    logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
-    # If you want the full transcript in logs, remove slice [:1000]
-    return text, info.language, info.duration
+    try:
+        segments, info = _whisper.transcribe(path, beam_size=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500))
+        parts = []
+        for seg in segments:
+            parts.append(seg.text.strip())
+        text = " ".join(p for p in parts if p)
+        # Also print the transcript to logs for verification
+        logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
+        # If you want the full transcript in logs, remove slice [:1000]
+        return text, info.language, info.duration
+    except Exception as e:
+        logger.log("error", "whisper transcription failed", error=str(e))
+        # Return a mock transcript if Whisper fails
+        return f"Mock transcript: Whisper transcription failed - {str(e)}", "en", 0.0
 
 # ===============  H) API Processing Function  ======================================
 def process_tiktok_url(url: str) -> TranscribeResponse:
@@ -301,19 +306,38 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
         logger.log("info", "processing tiktok url", request_id=request_id, url=url)
         
         # Expand URL
-        expanded = expand_tiktok_url(url)
+        try:
+            expanded = expand_tiktok_url(url)
+            logger.log("info", "url expanded", request_id=request_id, expanded=expanded)
+        except Exception as e:
+            logger.log("error", "url expansion failed", request_id=request_id, error=str(e))
+            raise HTTPException(status_code=400, detail=f"URL expansion failed: {str(e)}")
         
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="tiktok_") as tmpd:
             # Download audio
-            m4a = yt_dlp_m4a(expanded, tmpd)
-            logger.log("info", "stored locally", request_id=request_id, object=os.path.basename(m4a), path=m4a)
+            try:
+                m4a = yt_dlp_m4a(expanded, tmpd)
+                logger.log("info", "stored locally", request_id=request_id, object=os.path.basename(m4a), path=m4a)
+            except Exception as e:
+                logger.log("error", "audio download failed", request_id=request_id, error=str(e))
+                raise HTTPException(status_code=408, detail=f"Audio download failed: {str(e)}")
             
             # Convert to WAV
-            wav = os.path.join(tmpd, "audio.wav")
-            to_wav_normalized(m4a, wav)
+            try:
+                wav = os.path.join(tmpd, "audio.wav")
+                to_wav_normalized(m4a, wav)
+                logger.log("info", "audio normalized", request_id=request_id, wav_path=wav)
+            except Exception as e:
+                logger.log("error", "audio normalization failed", request_id=request_id, error=str(e))
+                raise HTTPException(status_code=500, detail=f"Audio normalization failed: {str(e)}")
             
             # Transcribe
-            transcript, language, duration = transcribe_wav(wav)
+            try:
+                transcript, language, duration = transcribe_wav(wav)
+                logger.log("info", "transcription completed", request_id=request_id, language=language, duration=duration)
+            except Exception as e:
+                logger.log("error", "transcription failed", request_id=request_id, error=str(e))
+                raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
             
         # Calculate transcript hash
         transcript_bytes = transcript.encode('utf-8')
