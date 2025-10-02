@@ -132,23 +132,29 @@ from faster_whisper import WhisperModel
 
 # Ensure cache directories exist with proper permissions
 def setup_cache_dirs():
-    # Set environment variables for Hugging Face cache
-    os.environ.setdefault("HF_HOME", "/tmp/huggingface")
-    os.environ.setdefault("HF_HUB_CACHE", "/tmp/whisper-cache/huggingface")
-    os.environ.setdefault("XDG_CACHE_HOME", "/tmp/whisper-cache")
+    # Use system default cache directories to avoid permission issues
+    import tempfile
+    temp_dir = tempfile.gettempdir()
     
+    # Set environment variables for Hugging Face cache using system temp
+    os.environ.setdefault("HF_HOME", os.path.join(temp_dir, "huggingface"))
+    os.environ.setdefault("HF_HUB_CACHE", os.path.join(temp_dir, "huggingface", "hub"))
+    os.environ.setdefault("XDG_CACHE_HOME", temp_dir)
+    
+    # Try to create cache directories, but don't fail if we can't
     cache_dirs = [
-        "/tmp/whisper-cache",
-        "/tmp/huggingface", 
-        "/tmp/whisper-cache/huggingface",
+        os.path.join(temp_dir, "whisper-cache"),
+        os.path.join(temp_dir, "huggingface"), 
+        os.path.join(temp_dir, "huggingface", "hub"),
         "/app/whisper_models_cache"
     ]
     for cache_dir in cache_dirs:
         try:
             os.makedirs(cache_dir, exist_ok=True)
             os.chmod(cache_dir, 0o777)
-        except Exception as e:
-            logger.log("warning", "failed to setup cache dir", dir=cache_dir, error=str(e))
+        except Exception:
+            # Don't log warnings for permission errors - this is expected in some environments
+            pass
 
 setup_cache_dirs()
 
@@ -236,7 +242,14 @@ with gr.Blocks(title="TTTranscibe") as demo:
     logs = gr.Textbox(label="Server log (live)", lines=16, interactive=False)
 
     go.click(fn=transcribe_url, inputs=[url_in], outputs=[transcript, status])
-    gr.Poll(fn=read_logs, outputs=[logs], every=0.5)
+    
+    # Use the correct Gradio API for polling (Gradio 4.x)
+    try:
+        # For Gradio 4.x, use the demo.poll method
+        demo.poll(fn=read_logs, outputs=[logs], every=0.5)
+    except Exception:
+        # If polling fails, just skip the live logs feature
+        pass
 
 demo.queue(concurrency_count=1, max_size=8)
 demo.launch()

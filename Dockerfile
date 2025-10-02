@@ -22,13 +22,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /tmp/whisper-cache \
-    /app/whisper_models_cache \
+RUN mkdir -p /app/whisper_models_cache \
     /tmp/huggingface \
-    /tmp/whisper-cache/huggingface \
-    && chmod -R 777 /tmp/whisper-cache \
+    /tmp/huggingface/hub \
     && chmod -R 777 /tmp/huggingface \
-    && chmod -R 777 /app/whisper_models_cache
+    && chmod -R 777 /app/whisper_models_cache \
+    && chown -R root:root /tmp/huggingface \
+    && chown -R root:root /app/whisper_models_cache
 
 # Pre-warm faster-whisper model to avoid download issues at runtime
 RUN python - <<'PY'
@@ -38,7 +38,7 @@ m = os.environ.get("WHISPER_MODEL", "tiny") or "tiny"
 print(f"Pre-warming faster-whisper model: {m}")
 
 # Ensure cache directories exist
-cache_dirs = ["/tmp/whisper-cache", "/tmp/huggingface", "/tmp/whisper-cache/huggingface", "/app/whisper_models_cache"]
+cache_dirs = ["/tmp/huggingface", "/tmp/huggingface/hub", "/app/whisper_models_cache"]
 for cache_dir in cache_dirs:
     os.makedirs(cache_dir, exist_ok=True)
     os.chmod(cache_dir, 0o777)
@@ -58,11 +58,11 @@ ENV WHISPER_MODEL=tiny
 ENV WHISPER_CACHE_DIR=/app/whisper_models_cache
 # Fix matplotlib permission issues
 ENV MPLCONFIGDIR=/tmp/matplotlib
-ENV XDG_CACHE_HOME=/tmp/whisper-cache
+ENV XDG_CACHE_HOME=/tmp
 ENV HOME=/tmp
 # Set Hugging Face cache directory to avoid permission issues
 ENV HF_HOME=/tmp/huggingface
-ENV HF_HUB_CACHE=/tmp/whisper-cache/huggingface
+ENV HF_HUB_CACHE=/tmp/huggingface/hub
 
 # Expose port
 EXPOSE 7860
