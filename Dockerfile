@@ -21,48 +21,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /app/whisper_models_cache \
-    /tmp/huggingface \
-    /tmp/huggingface/hub \
-    && chmod -R 777 /tmp/huggingface \
-    && chmod -R 777 /app/whisper_models_cache \
-    && chown -R root:root /tmp/huggingface \
-    && chown -R root:root /app/whisper_models_cache
+# Create persistent cache directories
+RUN mkdir -p /root/.cache/huggingface
 
-# Pre-warm faster-whisper model to avoid download issues at runtime
-RUN python - <<'PY'
-from faster_whisper import WhisperModel
-import os
-m = os.environ.get("WHISPER_MODEL", "tiny") or "tiny"
-print(f"Pre-warming faster-whisper model: {m}")
-
-# Ensure cache directories exist
-cache_dirs = ["/tmp/huggingface", "/tmp/huggingface/hub", "/app/whisper_models_cache"]
-for cache_dir in cache_dirs:
-    os.makedirs(cache_dir, exist_ok=True)
-    os.chmod(cache_dir, 0o777)
-
-# Pre-warm the model and ensure it's cached properly
-try:
-    model = WhisperModel(m, device="cpu", compute_type="int8")
-    print("Model ready:", m)
-    print("faster-whisper model loaded successfully")
-except Exception as e:
-    print(f"Warning: Failed to pre-warm model: {e}")
-    print("Model will be downloaded at runtime")
-PY
+# No build-time model pre-warming - let faster-whisper download at runtime
 
 # Set environment variables
 ENV WHISPER_MODEL=tiny
-ENV WHISPER_CACHE_DIR=/app/whisper_models_cache
+# Use persistent cache directories
+ENV HF_HOME=/root/.cache/huggingface
+ENV XDG_CACHE_HOME=/root/.cache
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
 # Fix matplotlib permission issues
 ENV MPLCONFIGDIR=/tmp/matplotlib
-ENV XDG_CACHE_HOME=/tmp
 ENV HOME=/tmp
-# Set Hugging Face cache directory to avoid permission issues
-ENV HF_HOME=/tmp/huggingface
-ENV HF_HUB_CACHE=/tmp/huggingface/hub
 
 # Expose port
 EXPOSE 7860

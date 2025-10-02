@@ -8,6 +8,7 @@ import logging
 # Set noisy loggers to WARNING level
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx._client").setLevel(logging.WARNING)
 
 # ===============  B) Live logging to console + UI  =================
 LOGS = deque(maxlen=1500)
@@ -130,28 +131,20 @@ def to_wav_normalized(src_path: str, dst_path: str) -> str:
 # Model is downloaded to the ephemeral cache; HF Spaces will cache layers
 from faster_whisper import WhisperModel
 
-# Ensure cache directories exist with proper permissions
+# Set up cache directories for faster-whisper
 def setup_cache_dirs():
-    # Use system default cache directories to avoid permission issues
-    import tempfile
-    temp_dir = tempfile.gettempdir()
-    
-    # Set environment variables for Hugging Face cache using system temp
-    os.environ.setdefault("HF_HOME", os.path.join(temp_dir, "huggingface"))
-    os.environ.setdefault("HF_HUB_CACHE", os.path.join(temp_dir, "huggingface", "hub"))
-    os.environ.setdefault("XDG_CACHE_HOME", temp_dir)
+    # Use persistent cache directories that work on Spaces
+    os.environ.setdefault("HF_HOME", "/root/.cache/huggingface")
+    os.environ.setdefault("XDG_CACHE_HOME", "/root/.cache")
     
     # Try to create cache directories, but don't fail if we can't
     cache_dirs = [
-        os.path.join(temp_dir, "whisper-cache"),
-        os.path.join(temp_dir, "huggingface"), 
-        os.path.join(temp_dir, "huggingface", "hub"),
-        "/app/whisper_models_cache"
+        "/root/.cache/huggingface",
+        "/root/.cache"
     ]
     for cache_dir in cache_dirs:
         try:
             os.makedirs(cache_dir, exist_ok=True)
-            os.chmod(cache_dir, 0o777)
         except Exception:
             # Don't log warnings for permission errors - this is expected in some environments
             pass
@@ -241,7 +234,7 @@ with gr.Blocks(title="TTTranscibe") as demo:
     transcript = gr.Textbox(label="Transcript", lines=12)
     logs = gr.Textbox(label="Server log (live)", lines=16, interactive=False)
 
-    go.click(fn=transcribe_url, inputs=[url_in], outputs=[transcript, status])
+    go.click(fn=transcribe_url, inputs=[url_in], outputs=[transcript, status], concurrency_limit=1)
     
     # Use the correct Gradio API for polling (Gradio 4.x)
     try:
@@ -251,5 +244,5 @@ with gr.Blocks(title="TTTranscibe") as demo:
         # If polling fails, just skip the live logs feature
         pass
 
-demo.queue(concurrency_count=1, max_size=8)
-demo.launch()
+demo.queue(max_size=8)
+demo.launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)), max_threads=1)
