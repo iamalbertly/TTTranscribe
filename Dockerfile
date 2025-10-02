@@ -19,11 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Ensure persistent cache directory exists
-RUN mkdir -p /data/transcripts_cache && chmod -R 777 /data
-
 # Create clean, writable cache directories
 RUN mkdir -p /home/user/.cache/huggingface \
+    && chmod -R 777 /home/user/.cache
     && chmod -R 777 /home/user/.cache
 
 # No build-time model pre-warming - let faster-whisper download at runtime
@@ -35,7 +33,6 @@ ENV HF_HOME=/home/user/.cache/huggingface
 ENV XDG_CACHE_HOME=/home/user/.cache
 ENV TRANSFORMERS_CACHE=/home/user/.cache/huggingface
 ENV HF_HUB_DISABLE_TELEMETRY=1
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV HF_HUB_READ_ONLY_TOKEN=
 ENV TRANSCRIPT_CACHE_DIR=/data/transcripts_cache
 # Fix matplotlib permission issues
