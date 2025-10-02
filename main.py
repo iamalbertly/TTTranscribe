@@ -435,6 +435,15 @@ async def health():
     """Health check endpoint"""
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
+@app.post("/api/test")
+async def test_endpoint():
+    """Simple test endpoint without TikTok processing"""
+    return {
+        "status": "ok",
+        "message": "API is working",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
 # ===============  J) Gradio UI (Legacy)  ======================================
 def transcribe_url(url: str, progress=gr.Progress()):
     try:
