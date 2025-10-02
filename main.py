@@ -130,10 +130,51 @@ def to_wav_normalized(src_path: str, dst_path: str) -> str:
 # Model is downloaded to the ephemeral cache; HF Spaces will cache layers
 from faster_whisper import WhisperModel
 
+# Ensure cache directories exist with proper permissions
+def setup_cache_dirs():
+    # Set environment variables for Hugging Face cache
+    os.environ.setdefault("HF_HOME", "/tmp/huggingface")
+    os.environ.setdefault("HF_HUB_CACHE", "/tmp/whisper-cache/huggingface")
+    os.environ.setdefault("XDG_CACHE_HOME", "/tmp/whisper-cache")
+    
+    cache_dirs = [
+        "/tmp/whisper-cache",
+        "/tmp/huggingface", 
+        "/tmp/whisper-cache/huggingface",
+        "/app/whisper_models_cache"
+    ]
+    for cache_dir in cache_dirs:
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            os.chmod(cache_dir, 0o777)
+        except Exception as e:
+            logger.log("warning", "failed to setup cache dir", dir=cache_dir, error=str(e))
+
+setup_cache_dirs()
+
 WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "medium")  # "small" if you hit RAM limits
 # load once
 logger.log("info", "loading whisper model", model=WHISPER_MODEL_NAME)
-_whisper = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type="int8")
+
+# Try to load the model with fallback cache directory handling
+try:
+    _whisper = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type="int8")
+    logger.log("info", "whisper model loaded successfully")
+except Exception as e:
+    logger.log("warning", "failed to load whisper model, trying with fallback method", error=str(e))
+    try:
+        # Fallback: try with different cache settings
+        _whisper = WhisperModel(WHISPER_MODEL_NAME, device="cpu", compute_type="int8", local_files_only=False)
+        logger.log("info", "whisper model loaded with fallback method")
+    except Exception as e2:
+        logger.log("error", "failed to load whisper model with fallback, trying tiny model", error=str(e2))
+        try:
+            # Final fallback: try with tiny model
+            _whisper = WhisperModel("tiny", device="cpu", compute_type="int8")
+            logger.log("info", "whisper model loaded with tiny fallback")
+        except Exception as e3:
+            logger.log("error", "failed to load whisper model with all fallbacks", error=str(e3))
+            raise RuntimeError(f"Could not load Whisper model {WHISPER_MODEL_NAME}: {e3}")
 
 def transcribe_wav(path: str) -> str:
     logger.log("info", "transcribing", path=path)
