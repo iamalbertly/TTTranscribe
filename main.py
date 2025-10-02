@@ -388,9 +388,22 @@ async def transcribe(
     if not verify_timestamp(x_timestamp):
         raise HTTPException(status_code=403, detail="Timestamp skew too large")
     
-    # Verify signature
-    body_json = json.dumps(request.dict())
-    if not verify_signature(x_api_key, x_timestamp, x_signature, "POST", "/api/transcribe", body_json):
+    # Verify signature - try multiple JSON formats
+    body_dict = request.dict()
+    body_json_variants = [
+        json.dumps(body_dict),
+        json.dumps(body_dict, separators=(',', ':')),
+        json.dumps(body_dict, sort_keys=True),
+        json.dumps(body_dict, separators=(',', ':'), sort_keys=True)
+    ]
+    
+    signature_valid = False
+    for body_json in body_json_variants:
+        if verify_signature(x_api_key, x_timestamp, x_signature, "POST", "/api/transcribe", body_json):
+            signature_valid = True
+            break
+    
+    if not signature_valid:
         raise HTTPException(status_code=403, detail="Invalid signature")
     
     # Check rate limit
