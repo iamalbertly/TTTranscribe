@@ -2,8 +2,14 @@ import os, sys, json, time, tempfile, subprocess, shlex, traceback
 from collections import deque
 import httpx
 import gradio as gr
+import logging
 
-# ===============  A) Live logging to console + UI  =================
+# ===============  A) Configure logging to reduce noise  =================
+# Set noisy loggers to WARNING level
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# ===============  B) Live logging to console + UI  =================
 LOGS = deque(maxlen=1500)
 
 class UILogHandler:
@@ -27,7 +33,7 @@ logger = UILogHandler("tttranscribe")
 def read_logs():
     return "\n".join(LOGS)
 
-# ===============  B) Helpers  ======================================
+# ===============  C) Helpers  ======================================
 def expand_tiktok_url(url: str) -> str:
     try:
         # HEAD first, then follow redirects manually to preserve UA and Referer
@@ -119,7 +125,7 @@ def to_wav_normalized(src_path: str, dst_path: str) -> str:
     logger.log("info", "transcode successful", wav=dst_path, wav_size=size, duration=dur)
     return dst_path
 
-# ===============  C) Transcription  =================================
+# ===============  D) Transcription  =================================
 # Use faster-whisper for speed and stability on Spaces CPU
 # Model is downloaded to the ephemeral cache; HF Spaces will cache layers
 from faster_whisper import WhisperModel
@@ -141,7 +147,7 @@ def transcribe_wav(path: str) -> str:
     # If you want the full transcript in logs, remove slice [:1000]
     return text
 
-# ===============  D) Gradio UI  =====================================
+# ===============  E) Gradio UI  =====================================
 def transcribe_url(url: str, progress=gr.Progress()):
     try:
         if not url or not url.strip():

@@ -8,25 +8,25 @@
   - Uses `faster-whisper` instead of `openai-whisper` for better performance
   - Synchronous processing: URL → fetch → normalize → transcribe → return result
   - Final transcript printed to container logs with `FINAL_TRANSCRIPT` key
-- **Dependencies updated**: Added `faster-whisper==1.0.3` to requirements.txt
+  - Eliminated all loopback calls to 127.0.0.1
+  - Throttled noisy logs (uvicorn.access, httpx to WARNING)
+- **Dependencies updated**: Pinned gradio==4.44.1, yt-dlp==2024.8.6, faster-whisper==1.0.3
 - **Rationale**: Fixes the core issue where pipeline stops after "normalized audio" and never returns transcript to UI
 - **Result**: TikTok URLs like `https://vm.tiktok.com/ZMAPTWV7o/` now return transcript directly to Gradio UI
 
 Staging deployment context (Hugging Face Space)
 ---------------------------------------------
 
-- Runtime: FastAPI API + background worker in a single Uvicorn process.
-- CORS: Configured via `CORS_ORIGINS` env (comma-separated, `*` allowed).
-- Storage: `SupabaseStorage` with local fallback. Public URLs emitted via `public_url()`:
-  - Local: `/files/<object_name>` mounted from `.local_storage/transcripts/*`
-  - Supabase: `<SUPABASE_URL>/storage/v1/object/public/<bucket>/<object_name>`
-- API contract:
-  - POST `/transcribe` → `{ id, job_id, status:PENDING }`
-  - GET `/transcribe/{id}` → includes `status`, `transcript_url`, `audio_url`, top-level `content_hash`, and `data.content_hash`.
-  - Health `/health`, repair `/jobs/repair` maintained.
-- Whisper cache: `WHISPER_CACHE_DIR` (default `/app/whisper_models_cache` in Docker Space).
-- Concurrency: `MAX_CONCURRENT_FETCHES`, `MAX_CONCURRENT_TRANSCRIBES` respected by semaphores.
-- Deployment files added: `Dockerfile`, `space.yaml`, `scripts/test_remote.ps1` (secrets set in Space UI). `.env.staging.example` should not contain real values.
+- Runtime: Simple Gradio app with synchronous processing.
+- No CORS needed: Direct Gradio UI without API endpoints.
+- No storage: Transcripts returned directly to UI, no file persistence.
+- UI contract:
+  - Single function: `transcribe_url(url)` → `(transcript_text, status)`
+  - Progress updates: "Expanding URL", "Fetching audio", "Converting to WAV", "Transcribing", "Done"
+  - Live logs: Ring buffer polled every 500ms for real-time feedback
+- Whisper cache: Model loaded once at startup using `faster-whisper` with int8 quantization.
+- No concurrency limits: Single-threaded processing per request.
+- Deployment files: `Dockerfile`, `space.yaml` (app_port: 7860).
 
 Last updated: 2025-09-21
 
@@ -48,10 +48,10 @@ Key modules (NEW ARCHITECTURE):
   - to_wav_normalized() → FFmpeg audio conversion
   - transcribe_wav() → faster-whisper transcription
   - transcribe_url() → Main processing function with progress
-- Legacy modules (now unused but preserved):
-  - app/api/* → FastAPI routes and Gradio mounting (deprecated)
-  - app/services/* → Background processing services (deprecated)
-  - app/store/* → Database and storage (deprecated)
+- Legacy modules (REMOVED):
+  - app/api/* → FastAPI routes and Gradio mounting (deleted)
+  - app/services/* → Background processing services (deleted)
+  - app/store/* → Database and storage (deleted)
 
 Dependency map (concise, single source of truth)
 - API: `fastapi`, `uvicorn`, `pydantic`
