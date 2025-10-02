@@ -5,15 +5,14 @@ $ErrorActionPreference = 'Stop'
 & .\.venv\Scripts\Activate.ps1
 
 # Fast-start env for local smoke
-$env:DATABASE_URL = 'memory://smoke'
+# No database needed for simple app
 $env:ENVIRONMENT = 'development'
 $env:WHISPER_MODEL = 'tiny'
 $env:WHISPER_CACHE_DIR = "$PWD\whisper_models_cache"
-$env:CORS_ORIGINS = '*'
-$env:ALLOW_TIKTOK_ADAPTER = 'true'
+# No CORS or adapter settings needed for simple app
 
 # Start with explicit venv python to avoid PATH issues
-$proc = Start-Process powershell -ArgumentList "-NoProfile -Command .\\.venv\\Scripts\\python.exe -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000" -PassThru
+$proc = Start-Process powershell -ArgumentList "-NoProfile -Command .\\.venv\\Scripts\\python.exe main.py" -PassThru
 
 # Wait until server is ready (max 90s)
 $deadlineWait = (Get-Date).AddSeconds(90)

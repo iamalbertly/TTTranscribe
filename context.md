@@ -54,12 +54,10 @@ Key modules (NEW ARCHITECTURE):
   - app/store/* → Database and storage (deleted)
 
 Dependency map (concise, single source of truth)
-- API: `fastapi`, `uvicorn`, `pydantic`
+- UI: `gradio` for direct user interface
 - Media: `yt-dlp` (invoked via `python -m yt_dlp`), `ffmpeg-python` (requires system ffmpeg/ffprobe)
-- ASR: `openai-whisper` with Torch CPU; model prewarmed under `whisper_models_cache`
-- IO/HTTP: `httpx`
-- DB: `asyncpg` (production), in-memory store when `DATABASE_URL=memory://*`
-- UI: `gradio` mounted at `/` from `app/api/gradio_simple_fixed.py`
+- ASR: `faster-whisper` with Torch CPU; model prewarmed under `whisper_models_cache`
+- IO/HTTP: `httpx` for URL expansion
 
 Naming conventions (enforced moving forward)
 - Files reflect purpose and module (no duplicates). Example: `api/transcription_routes.py` (SSoT for request/response contract)

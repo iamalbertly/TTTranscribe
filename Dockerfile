@@ -22,41 +22,24 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p .local_storage/transcripts/audio \
-    .local_storage/transcripts/transcripts \
-    .local_storage/transcripts/keys \
-    whisper-cache \
-    /tmp/whisper-cache \
+RUN mkdir -p /tmp/whisper-cache \
     /app/whisper_models_cache
 
-# Pre-warm Whisper model to avoid download issues at runtime
+# Pre-warm faster-whisper model to avoid download issues at runtime
 RUN python - <<'PY'
-import whisper, os
-m = os.environ.get("WHISPER_MODEL","tiny") or "tiny"
-print(f"Pre-warming Whisper model: {m}")
+from faster_whisper import WhisperModel
+import os
+m = os.environ.get("WHISPER_MODEL", "tiny") or "tiny"
+print(f"Pre-warming faster-whisper model: {m}")
 # Pre-warm the model and ensure it's cached properly
-whisper.load_model(m, download_root="/app/whisper_models_cache")
+model = WhisperModel(m, device="cpu", compute_type="int8")
 print("Model ready:", m)
-# Verify the model file exists
-model_path = f"/app/whisper_models_cache/{m}.pt"
-if os.path.exists(model_path):
-    print(f"Model cached at: {model_path}")
-else:
-    print("Warning: Model file not found after download")
+print("faster-whisper model loaded successfully")
 PY
 
 # Set environment variables
-ENV DATABASE_URL=memory://
-ENV ENVIRONMENT=production
 ENV WHISPER_MODEL=tiny
 ENV WHISPER_CACHE_DIR=/app/whisper_models_cache
-ENV CORS_ORIGINS=*
-ENV ALLOW_TIKTOK_ADAPTER=true
-ENV MAX_AUDIO_SECONDS=300
-ENV GLOBAL_REQUESTS_PER_MINUTE=60
-# Xet storage configuration for better performance
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
-ENV TRANSCRIPT_STORAGE=xet
 # Fix matplotlib permission issues
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV XDG_CACHE_HOME=/tmp/whisper-cache
@@ -65,5 +48,5 @@ ENV HOME=/tmp
 # Expose port
 EXPOSE 7860
 
-# Run the application directly via uvicorn
-CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "7860", "--log-level", "debug"]
+# Run the application directly
+CMD ["python", "main.py"]

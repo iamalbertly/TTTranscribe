@@ -47,9 +47,9 @@ The app uses FastAPI lifespan events to initialize shared clients, model, and lo
 ```
 pip install -r requirements.txt
 ```
-4) Run the API:
+4) Run the app:
 ```
-uvicorn app.api.main:app --reload
+python main.py
 ```
 
 ## Windows 11 quickstart (recommended Python 3.11)
@@ -68,28 +68,19 @@ pip install --upgrade pip
 pip install -r requirements.txt -c constraints.win-py311.txt
 ```
 
-3) Install Whisper after Torch is in place
+3) Install faster-whisper after Torch is in place
 ```
-pip install openai-whisper==20231117
+pip install faster-whisper==1.0.3
 ```
 
-4) Start API without autoreloader (ensures venv interpreter is used)
+4) Start the app:
 ```
-$env:DATABASE_URL='memory://'
-$env:ALLOW_TIKTOK_ADAPTER='true'
 $env:WHISPER_MODEL='tiny'
 $env:WHISPER_CACHE_DIR="$PWD\whisper_models_cache"
-.\.venv\Scripts\python.exe -m uvicorn app.api.main:app --host 127.0.0.1 --port 8000
+python main.py
 ```
 
-5) In another terminal, smoke test and run an E2E
-```
-Invoke-RestMethod http://127.0.0.1:8000/health | Format-List
-$body = @{ url = "https://vm.tiktok.com/ZMA2jFqyJ" } | ConvertTo-Json
-$job = Invoke-RestMethod -Method POST -Uri http://127.0.0.1:8000/transcribe -Body $body -ContentType 'application/json'
-$jobId = $job.job_id
-Do { Start-Sleep 5; $st = Invoke-RestMethod http://127.0.0.1:8000/transcribe/$jobId; $st | Format-List } While ($st.status -notin @('COMPLETE','FAILED'))
-```
+5) Test the app by opening http://127.0.0.1:7860 in your browser and entering a TikTok URL
 
 Notes:
 - `WHISPER_CACHE_DIR` defaults to `whisper-cache/` if not set.

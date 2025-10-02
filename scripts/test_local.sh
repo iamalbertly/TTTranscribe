@@ -3,7 +3,7 @@ set -euo pipefail
 
 echo "Prerequisites:"
 echo " - Ensure ffmpeg and yt-dlp are installed and on your PATH."
-echo " - Start the API in another terminal: uvicorn app.api.main:app --reload"
+echo " - Start the app in another terminal: python main.py"
 
 sleep 10
 

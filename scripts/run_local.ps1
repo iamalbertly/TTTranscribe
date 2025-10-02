@@ -44,22 +44,20 @@ if ($tryPort -ne $Port) { Write-Host "[run] Port $Port busy; using $tryPort" }
 $env:PORT = "$tryPort"
 
 # Set environment variables
-$env:DATABASE_URL = if ($env:DATABASE_URL) { $env:DATABASE_URL } else { 'memory://' }
-$env:ALLOW_TIKTOK_ADAPTER = if ($env:ALLOW_TIKTOK_ADAPTER) { $env:ALLOW_TIKTOK_ADAPTER } else { 'true' }
+# No database needed for simple app
+# No adapter settings needed for simple app
 if (-not $env:WHISPER_MODEL) { $env:WHISPER_MODEL = 'tiny' }
 if (-not $env:WHISPER_CACHE_DIR) { $env:WHISPER_CACHE_DIR = 'whisper_models_cache' }
-# Speed: lower worker poll interval for faster pickup; more fetch concurrency
-if (-not $env:WORKER_POLL_INTERVAL_SECONDS) { $env:WORKER_POLL_INTERVAL_SECONDS = '1' }
-if (-not $env:MAX_CONCURRENT_FETCHES) { $env:MAX_CONCURRENT_FETCHES = '3' }
+# No worker settings needed for simple app
 
 Write-Host "[run] Starting server on port $tryPort"
-Write-Host "[run] DATABASE_URL=$($env:DATABASE_URL)"
-Write-Host "[run] ALLOW_TIKTOK_ADAPTER=$($env:ALLOW_TIKTOK_ADAPTER)"
+# No database needed for simple app
+# No adapter settings needed for simple app
 Write-Host "[run] WHISPER_MODEL=$($env:WHISPER_MODEL)"
 
 # Start Uvicorn ONCE, no reload
 if ($py -eq "py -3.11") {
-  & py -3.11 -m uvicorn app.api.main:app --host 127.0.0.1 --port $tryPort
+  & py -3.11 main.py
 } else {
-  & $py -m uvicorn app.api.main:app --host 127.0.0.1 --port $tryPort
+  & $py main.py
 }
