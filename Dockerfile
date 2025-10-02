@@ -19,7 +19,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-<<<<<<< HEAD
 # Ensure persistent cache directory exists
 RUN mkdir -p /data/transcripts_cache && chmod -R 777 /data
 
@@ -36,29 +35,9 @@ ENV HF_HOME=/home/user/.cache/huggingface
 ENV XDG_CACHE_HOME=/home/user/.cache
 ENV TRANSFORMERS_CACHE=/home/user/.cache/huggingface
 ENV HF_HUB_DISABLE_TELEMETRY=1
-ENV TRANSCRIPT_CACHE_DIR=/data/transcripts_cache
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV HF_HUB_READ_ONLY_TOKEN=
-=======
-# Create necessary directories
-RUN mkdir -p /tmp/whisper-cache \
-    /app/whisper_models_cache
-
-# Pre-warm faster-whisper model to avoid download issues at runtime
-RUN python - <<'PY'
-from faster_whisper import WhisperModel
-import os
-m = os.environ.get("WHISPER_MODEL", "tiny") or "tiny"
-print(f"Pre-warming faster-whisper model: {m}")
-# Pre-warm the model and ensure it's cached properly
-model = WhisperModel(m, device="cpu", compute_type="int8")
-print("Model ready:", m)
-print("faster-whisper model loaded successfully")
-PY
-
-# Set environment variables
-ENV WHISPER_MODEL=tiny
-ENV WHISPER_CACHE_DIR=/app/whisper_models_cache
->>>>>>> b5b28564 (CI deploy - 2025-10-02 21:20:45)
+ENV TRANSCRIPT_CACHE_DIR=/data/transcripts_cache
 # Fix matplotlib permission issues
 ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV HOME=/tmp
@@ -66,10 +45,5 @@ ENV HOME=/tmp
 # Expose port
 EXPOSE 7860
 
-<<<<<<< HEAD
-# Run the FastAPI app via Uvicorn
-CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
-=======
 # Run the application directly
 CMD ["python", "main.py"]
->>>>>>> b5b28564 (CI deploy - 2025-10-02 21:20:45)

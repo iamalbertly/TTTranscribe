@@ -287,26 +287,13 @@ Notes:
    - SUPABASE_STORAGE_BUCKET
    - Optionally ALLOW_TIKTOK_ADAPTER=false to disable TikTok fetcher
    - Optionally ALLOW_UPLOAD_ADAPTER=true to enable file uploads
-4) The container serves on port 7860. Test endpoints:
-   - GET /health
-   - POST /transcribe (short TikTok URL)
+4) The container serves on port 7860. Open the URL in your browser to use the Gradio interface.
 
-Next step: If TikTok fetching becomes unreliable, set `ALLOW_TIKTOK_ADAPTER=false` and use the optional upload path to provide audio directly. The upload path stores files privately in Supabase Storage, then runs normalization + transcription.
+The app now uses a simple synchronous approach - no database or external services required.
 
-## Apply schema in Supabase SQL Editor
+## Database Schema (No longer needed)
 
-1) Open Supabase project → SQL Editor.
-2) Paste contents of `db/migrations.sql`.
-3) Run once to provision `jobs` and `assets` tables and triggers.
-
-### CI-based Migrations (Supabase CLI)
-
-- Use the GitHub workflow `Supabase Migrate` to apply `db/migrations.sql` to your Supabase project.
-- It is a `workflow_dispatch` with input `confirm` (boolean). When `confirm=true`, it runs `supabase db push`; otherwise it prints a dry run message.
-- Required repository secrets:
-  - `SUPABASE_ACCESS_TOKEN`
-  - `SUPABASE_PROJECT_REF`
-  - Any database password the CLI may prompt for (managed on Supabase side; CLI uses access token + ref).
+The app now uses a simple synchronous approach without database dependencies.
 
 ### Safe deploy using env token (no secrets in repo)
 
@@ -342,21 +329,13 @@ git push origin main --force-with-lease
 ```
 After the remote branch no longer contains token-bearing commits, deploys will succeed using env-based token.
 
-## API and Polling Pattern
+## Simple Gradio Interface
 
-### Core Endpoints
-
-- `GET /health`: Returns JSON with Whisper model name, tool presence (yt-dlp, ffprobe), database connectivity, `queue_counts`, `lease_stats`, `last_error`.
-- `POST /transcribe`: Body `{ "url": "https://www.tiktok.com/...", "idempotency_key": "optional" }`.
-  - Expands and normalizes URL, checks cache; if both audio/transcript exist, returns COMPLETE immediately.
-  - Otherwise enqueues job and returns `202 { job_id }`.
-- `GET /transcribe/{job_id}`: Returns
-  - `{"status":"PENDING"}` or `{"status":"RUNNING"}` during processing
-  - `200 { status: "COMPLETE", job_id, audio_url, transcript_url, text_preview, text, data: { transcription_storage_key, cache_hit, content_hash } }`
-  - On failure: `4xx/5xx { status: "FAILED", job_id, code, message, raw_error }`
-- `GET /transcript/{job_id}`: Returns the full transcript text and metadata for completed jobs
-  - `200 { job_id, text, source_url, created_at, model, content_hash }`
-  - Returns `404` if job not found or `400` if transcript not ready yet
+The app now uses a direct Gradio interface where users can:
+- Enter a TikTok URL
+- Click "Transcribe" 
+- See the transcript appear immediately
+- No API endpoints or polling required
 
 ### Android App Integration
 
