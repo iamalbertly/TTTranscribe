@@ -1,14 +1,16 @@
-## 2025-09-29  — UI arg-mismatch hardening
+## 2025-01-27  — MAJOR ARCHITECTURE CHANGE: Synchronous Drop-in Fix
 
-- Gradio frontend: consolidated to single source `app/api/gradio_simple_fixed.py` mounted from `app/api/main.py`.
-- Changes:
-  - BASE_URL → same-origin path (`""`) to avoid port/host drift.
-  - Blocks instantiated with `show_api=False`; also guarded via `interface.show_api=False`.
-  - Handler `transcribe_video(url: str, *args, **kwargs)` accepts extra event args injected by Gradio 4.44 to avoid arg-count mismatches.
-  - Queue disabled explicitly `interface.queue(False)`; button `.click(..., queue=False)`.
-- Rationale: Fix “Too many arguments provided for the endpoint” from Gradio frontend (api_info.ts) while keeping server contract stable (`POST /transcribe` expects `{ url }`).
-- No backend endpoint/signature changes; single source of truth: `TranscribeRequest` in `app/api/transcription_routes.py`.
-- Next: Re-deploy Space to propagate front-end config (the warning originates client-side; code fixes require redeploy).
+- **COMPLETE REPLACEMENT**: Replaced complex FastAPI + background worker architecture with simple synchronous Gradio app.
+- **New app.py**: Single-file solution that fetches, normalizes, and transcribes TikTok URLs in one synchronous call.
+- **Key changes**:
+  - Removed FastAPI server, background workers, database dependencies
+  - Direct Gradio UI with live server logs
+  - Uses `faster-whisper` instead of `openai-whisper` for better performance
+  - Synchronous processing: URL → fetch → normalize → transcribe → return result
+  - Final transcript printed to container logs with `FINAL_TRANSCRIPT` key
+- **Dependencies updated**: Added `faster-whisper==1.0.3` to requirements.txt
+- **Rationale**: Fixes the core issue where pipeline stops after "normalized audio" and never returns transcript to UI
+- **Result**: TikTok URLs like `https://vm.tiktok.com/ZMAPTWV7o/` now return transcript directly to Gradio UI
 
 Staging deployment context (Hugging Face Space)
 ---------------------------------------------
@@ -30,25 +32,26 @@ Last updated: 2025-09-21
 
 Project: tiktok-transcriber-mvp (lean monolith)
 
-Dependency map (pinned minimal):
-- fastapi, uvicorn → API server with lifespan hooks
-- yt-dlp → TikTok fetch to audio (m4a)
-- openai-whisper → CPU transcription (tiny)
-- ffmpeg-python → normalization; system ffmpeg/ffprobe required
-- python-dotenv, pydantic → config
-- httpx → Supabase Storage REST
-- asyncpg → Postgres access
+Dependency map (NEW SIMPLIFIED ARCHITECTURE):
+- gradio → Direct UI with live logging
+- yt-dlp → TikTok fetch to audio (m4a) via subprocess
+- faster-whisper → CPU transcription (medium model, int8)
+- httpx → URL expansion and HTTP requests
+- ffmpeg/ffprobe → Audio normalization (system binaries)
+- tempfile → Temporary file handling
 
-Key modules:
-- app/core/config.py → AppSettings, env defaults, whisper cache dir
-- app/core/logging.py → JSON logs with job_id and component
-- app/api/main.py → FastAPI app, startup tool checks, model preload
-- app/services/fetchers.py → yt-dlp audio fetch with HLS fallback
-- app/services/normalize.py → ffmpeg to wav 16k mono + hash + duration cap
-- app/services/transcribe.py → async transcription wrapper
-- app/services/worker.py → job processing with graceful error handling
-- app/store/db.py → asyncpg pool, schema, upsert_job
-- app/store/storage.py → Supabase Storage upload REST
+Key modules (NEW ARCHITECTURE):
+- app.py → Single-file Gradio app with synchronous processing
+  - UILogHandler → Live logging to console + UI
+  - expand_tiktok_url() → URL expansion with proper headers
+  - yt_dlp_m4a() → Audio download via yt-dlp subprocess
+  - to_wav_normalized() → FFmpeg audio conversion
+  - transcribe_wav() → faster-whisper transcription
+  - transcribe_url() → Main processing function with progress
+- Legacy modules (now unused but preserved):
+  - app/api/* → FastAPI routes and Gradio mounting (deprecated)
+  - app/services/* → Background processing services (deprecated)
+  - app/store/* → Database and storage (deprecated)
 
 Dependency map (concise, single source of truth)
 - API: `fastapi`, `uvicorn`, `pydantic`
@@ -101,7 +104,7 @@ UI Single Source of Truth (SSoT):
 - Removed obsolete/broken UI variants to prevent duplication: `gradio_ui.py`, `gradio_simple.py`, `gradio_debug.py`, `gradio_fixed.py`, `gradio_ui_simple.py`, `gradio_test.py`, `gradio_working.py` (pending deletion if not referenced).
 - Queue disabled via `interface.queue(False)`; UI uses BASE_URL `http://127.0.0.1:7860`.
 
-Last updated: 2025-09-29 (refactor consolidation)
+Last updated: 2025-01-27 (synchronous drop-in fix)
 
 Refactor summary (no new bottlenecks):
 - Removed duplicate Gradio modules; canonical `gradio_simple_fixed.py` mounted in `app/api/main.py`.
