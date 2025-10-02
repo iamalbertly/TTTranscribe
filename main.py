@@ -133,14 +133,17 @@ from faster_whisper import WhisperModel
 
 # Set up cache directories for faster-whisper
 def setup_cache_dirs():
-    # Use persistent cache directories that work on Spaces
-    os.environ.setdefault("HF_HOME", "/root/.cache/huggingface")
-    os.environ.setdefault("XDG_CACHE_HOME", "/root/.cache")
+    # Use clean, writable cache directories that work on Spaces
+    os.environ.setdefault("HF_HOME", "/home/user/.cache/huggingface")
+    os.environ.setdefault("XDG_CACHE_HOME", "/home/user/.cache")
+    os.environ.setdefault("TRANSFORMERS_CACHE", "/home/user/.cache/huggingface")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("HF_HUB_READ_ONLY_TOKEN", "")
     
     # Try to create cache directories, but don't fail if we can't
     cache_dirs = [
-        "/root/.cache/huggingface",
-        "/root/.cache"
+        "/home/user/.cache/huggingface",
+        "/home/user/.cache"
     ]
     for cache_dir in cache_dirs:
         try:
