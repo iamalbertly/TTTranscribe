@@ -139,6 +139,7 @@ def setup_cache_dirs():
     os.environ.setdefault("TRANSFORMERS_CACHE", "/home/user/.cache/huggingface")
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
     os.environ.setdefault("HF_HUB_READ_ONLY_TOKEN", "")
+    # Do NOT set HF_HUB_ENABLE_HF_TRANSFER - let it use standard downloader
     
     # Try to create cache directories, but don't fail if we can't
     cache_dirs = [

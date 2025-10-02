@@ -72,7 +72,7 @@ Duplication/circulars status
 - No circular imports found across `api/services/store`
 
 Operational notes
-- Default dev/test use `DATABASE_URL=memory://*` to avoid asyncpg build issues
+- No database dependencies - simple synchronous processing
 - Health, queue, and lease stats surfaced via `GET /health`
 - Static mounts in dev at `/files/audio` and `/files/transcripts`
 
@@ -100,14 +100,14 @@ Notes:
 UI Single Source of Truth (SSoT):
 - Canonical UI: `app/api/gradio_simple_fixed.py` mounted in `app/api/main.py`.
 - Removed obsolete/broken UI variants to prevent duplication: `gradio_ui.py`, `gradio_simple.py`, `gradio_debug.py`, `gradio_fixed.py`, `gradio_ui_simple.py`, `gradio_test.py`, `gradio_working.py` (pending deletion if not referenced).
-- Queue disabled via `interface.queue(False)`; UI uses BASE_URL `http://127.0.0.1:7860`.
+- Direct Gradio interface with no API endpoints or queue management.
 
 Last updated: 2025-01-27 (synchronous drop-in fix)
 
 Refactor summary (no new bottlenecks):
 - Removed duplicate Gradio modules; canonical `gradio_simple_fixed.py` mounted in `app/api/main.py`.
 - Removed obsolete endpoint `transcribeOrGet`; single path via `TranscribeRequest` flow.
-- Database now supports `DATABASE_URL=memory://*` for tests; avoids asyncpg in tests.
+- No database dependencies - direct processing without persistence
 - Matplotlib usage made optional to reduce test/runtime deps.
 - Error responses for failed jobs are now top-level `{code, message, status, job_id}` (not nested in `detail`).
 

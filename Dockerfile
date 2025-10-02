@@ -21,13 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# One-time cleanup of old root-owned cache (remove this after first successful build)
-RUN rm -rf /root/.cache/huggingface || true
-
 # Create clean, writable cache directories
 RUN mkdir -p /home/user/.cache/huggingface \
-    && chmod -R 777 /home/user/.cache \
-    && chown -R root:root /home/user/.cache
+    && chmod -R 777 /home/user/.cache
 
 # No build-time model pre-warming - let faster-whisper download at runtime
 
@@ -38,7 +34,6 @@ ENV HF_HOME=/home/user/.cache/huggingface
 ENV XDG_CACHE_HOME=/home/user/.cache
 ENV TRANSFORMERS_CACHE=/home/user/.cache/huggingface
 ENV HF_HUB_DISABLE_TELEMETRY=1
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
 ENV HF_HUB_READ_ONLY_TOKEN=
 # Fix matplotlib permission issues
 ENV MPLCONFIGDIR=/tmp/matplotlib

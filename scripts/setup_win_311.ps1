@@ -50,7 +50,7 @@ try {
 
 	# Clean any broken leftover dists that can confuse Windows imports
 	Write-Host "[setup] Cleaning residual packages (torch/numpy/whisper/tiktoken/numba/llvmlite) if present..."
-	try { pip uninstall -y torch torchvision torchaudio numpy openai-whisper tiktoken numba llvmlite 2>$null | Out-Null } catch {}
+	try { pip uninstall -y torch torchvision torchaudio numpy tiktoken numba llvmlite 2>$null | Out-Null } catch {}
 	# Remove stray folders like '~orch*' and numpy artifacts that pip may leave behind
 	$siteDir = (& python -c "import site; print(site.getsitepackages()[0])").Trim()
 	if (Test-Path $siteDir) {

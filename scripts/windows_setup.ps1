@@ -18,6 +18,6 @@ python -m venv .venv
 Write-Host "Installing requirements..."
 pip install -r requirements.txt
 
-Write-Host "Reminder: copy .env.example to .env and set DATABASE_URL to your Supabase Postgres connection string (not the REST URL)."
+Write-Host "No database configuration needed - the app uses simple synchronous processing."
 
 
