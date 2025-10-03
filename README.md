@@ -1,3 +1,14 @@
+---
+title: TTTranscibe - TikTok Video Transcription API
+emoji: 🎧
+colorFrom: blue
+colorTo: purple
+sdk: docker
+sdk_version: "1.0"
+app_file: Dockerfile
+pinned: false
+---
+
 # TTTranscibe - TikTok Video Transcription API
 
 A FastAPI + Gradio hybrid application that transcribes TikTok videos to text using faster-whisper.
