@@ -196,7 +196,7 @@ cd tiktok-transciber-mvp
 # Install dependencies
 pip install -r requirements.txt
 
-# Run locally
+# Run locally (single entrypoint)
 python main.py
 ```
 
@@ -228,11 +228,14 @@ docker run -p 7860:7860 tiktok-transcriber
 
 ## Architecture
 
-- **FastAPI**: REST API with authentication and rate limiting
-- **Gradio**: Web UI for testing and demonstration
-- **faster-whisper**: CPU-optimized transcription
-- **yt-dlp**: TikTok video audio extraction
-- **ffmpeg**: Audio processing and normalization
+- **FastAPI**: REST API with authentication and rate limiting (see `app/api.py`)
+- **Gradio**: Web UI mounted on FastAPI root
+- **Auth**: HMAC + timestamp (`app/auth.py`)
+- **Rate limiting**: Token bucket (`app/rate_limit.py`)
+- **Networking**: URL expansion (`app/network.py`)
+- **Media**: `yt-dlp` + `ffmpeg` helpers (`app/media.py`)
+- **ASR**: `faster-whisper` (`app/transcription.py`)
+- **Logging**: JSON logs + optional GCP (`app/logging_utils.py`)
 
 ## Testing
 

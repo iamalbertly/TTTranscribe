@@ -1,4 +1,33 @@
-## 2025-01-27  — MAJOR ARCHITECTURE CHANGE: Public API Implementation
+## 2025-10-03 — Modularization & Duplication Cleanup
+
+- Consolidated monolithic server into modules under `app/`:
+  - `app/api.py` → FastAPI/Gradio app factory (`create_app`), endpoint handlers
+  - `app/auth.py` → Auth config and HMAC/timestamp verification
+  - `app/rate_limit.py` → Token bucket per API key
+  - `app/network.py` → URL expansion via `httpx`
+  - `app/media.py` → `ffmpeg`/`yt-dlp` helpers
+  - `app/transcription.py` → `faster-whisper` load + `transcribe_wav`
+  - `app/logging_utils.py` → JSON log + optional GCP mirror
+- Single entrypoint: `main.py` imports `create_app()`; removed duplicate `app.py`.
+- Kept files <300 LOC by separation of concerns; removed obsolete/duplicate modules.
+
+Dependency map (SSoT)
+- fastapi, gradio, httpx, yt-dlp, ffmpeg, faster-whisper
+
+Routes
+- POST `/api/transcribe` (HMAC auth, rate-limited)
+- GET `/health`
+- Gradio UI mounted at `/`
+
+Config (env)
+- `API_SECRET`, `API_KEYS_JSON`, `RATE_LIMIT_CAPACITY`, `RATE_LIMIT_REFILL_PER_MIN`, whisper model via `WHISPER_MODEL`.
+
+Notes
+- Avoided circular imports by isolating concerns.
+- Testing scripts unchanged; Dockerfile runs `python main.py`.
+
+Last validated: 2025-10-03
+
 
 - **NEW PUBLIC API**: Implemented FastAPI-based public API with HMAC-SHA256 authentication and rate limiting.
 - **Dual Interface**: Maintains Gradio UI for direct user interaction while adding REST API for programmatic access.
