@@ -124,3 +124,28 @@
 5. **Gradual Rollout**: Test with mock data first, then real TikTok URLs
 
 The API infrastructure is solid and working correctly. The remaining issue is specifically with the TikTok processing pipeline, which can be resolved through debugging and dependency management.
+
+## 2025-10-03T12:14:11.913022+00:00 E2E Test
+- base=https://iamromeoly-tttranscibe.hf.space
+- first_status=500 elapsed=1.48s billed=None
+- second_status=500 elapsed=1.56s billed=None
+
+## 2025-10-03T12:24:49.331465+00:00 E2E Test
+- base=http://localhost:7860
+- first_status=401 elapsed=2.03s billed=None
+- second_status=401 elapsed=2.05s billed=None
+
+## 2025-10-03T12:28:00.186505+00:00 E2E Test
+- base=https://iamromeoly-tttranscibe.hf.space
+- first_status=500 elapsed=1.85s billed=None
+- second_status=500 elapsed=1.83s billed=None
+
+## 2025-10-03T13:06:23.053109+00:00 E2E Test
+- base=https://iamromeoly-tttranscibe.hf.space
+- first_status=500 elapsed=3.22s billed=None
+- second_status=500 elapsed=3.63s billed=None
+
+## 2025-10-03T13:13:48.824374+00:00 E2E Test
+- base=https://iamromeoly-tttranscibe.hf.space
+- first_status=500 elapsed=8.43s billed=None
+- second_status=500 elapsed=2.50s billed=None

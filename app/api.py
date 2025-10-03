@@ -15,6 +15,58 @@ from .network import expand_tiktok_url
 from .media import yt_dlp_m4a, to_wav_normalized
 from .transcription import transcribe_wav
 
+# Simple filesystem cache to avoid regenerating recent transcripts
+CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", os.path.join(os.getcwd(), "transcripts_cache"))
+CACHE_TTL_SEC = int(os.environ.get("TRANSCRIPT_CACHE_TTL_SEC", "86400"))  # 24h default
+
+def _safe_mkdir(path: str) -> None:
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        pass
+
+def _cache_key_for_url(expanded_url: str) -> str:
+    # Prefer video_id when present; fallback to sha256 of canonical url
+    vid = "unknown"
+    if "tiktok.com" in expanded_url and "/video/" in expanded_url:
+        try:
+            vid = expanded_url.split("/video/")[1].split("?")[0]
+        except Exception:
+            vid = "unknown"
+    if vid and vid != "unknown":
+        return f"video_{vid}.json"
+    return hashlib.sha256(expanded_url.encode("utf-8")).hexdigest() + ".json"
+
+def _read_cache(expanded_url: str) -> Optional[dict]:
+    _safe_mkdir(CACHE_DIR)
+    key = _cache_key_for_url(expanded_url)
+    fp = os.path.join(CACHE_DIR, key)
+    try:
+        if os.path.exists(fp):
+            age = time.time() - os.path.getmtime(fp)
+            if age <= CACHE_TTL_SEC:
+                with open(fp, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                logger.log("info", "cache_hit", cache_key=key, age_sec=int(age))
+                return data
+            else:
+                logger.log("info", "cache_stale", cache_key=key, age_sec=int(age))
+        return None
+    except Exception as e:
+        logger.log("warning", "cache_read_failed", error=str(e))
+        return None
+
+def _write_cache(expanded_url: str, payload: dict) -> None:
+    _safe_mkdir(CACHE_DIR)
+    key = _cache_key_for_url(expanded_url)
+    fp = os.path.join(CACHE_DIR, key)
+    try:
+        with open(fp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        logger.log("info", "cache_write_ok", cache_key=key, size=len(json.dumps(payload)))
+    except Exception as e:
+        logger.log("warning", "cache_write_failed", error=str(e))
+
 
 logger = UILogHandler("tttranscribe")
 
@@ -42,6 +94,24 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
     try:
         logger.log("info", "processing tiktok url", request_id=request_id, url=url)
         expanded = expand_tiktok_url(url)
+
+        # Check cache before heavy work
+        cached = _read_cache(expanded)
+        if cached:
+            # Return cached response while preserving a new request_id and elapsed timing
+            elapsed_ms = int((time.time() - start_time) * 1000)
+            return TranscribeResponse(
+                request_id=request_id,
+                status=cached.get("status", "ok"),
+                lang=cached.get("lang", "en"),
+                duration_sec=float(cached.get("duration_sec", 0.0)),
+                transcript=cached.get("transcript", ""),
+                transcript_sha256=cached.get("transcript_sha256", ""),
+                source=cached.get("source", {"canonical_url": expanded, "video_id": "unknown"}),
+                billed_tokens=0,
+                elapsed_ms=elapsed_ms,
+                ts=datetime.now(timezone.utc).isoformat(),
+            )
 
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="tiktok_") as tmpd:
             m4a = yt_dlp_m4a(expanded, tmpd)
@@ -71,7 +141,7 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
             transcript_length=len(transcript),
         )
 
-        return TranscribeResponse(
+        result = TranscribeResponse(
             request_id=request_id,
             status="ok",
             lang=language,
@@ -83,14 +153,29 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
             elapsed_ms=elapsed_ms,
             ts=datetime.now(timezone.utc).isoformat(),
         )
+
+        # Persist to cache for future requests
+        _write_cache(
+            expanded,
+            {
+                "status": result.status,
+                "lang": result.lang,
+                "duration_sec": result.duration_sec,
+                "transcript": result.transcript,
+                "transcript_sha256": result.transcript_sha256,
+                "source": result.source,
+            },
+        )
+
+        return result
     except subprocess.CalledProcessError as e:
-        logger.log("error", "subprocess failed", request_id=request_id, cmd=e.cmd, code=e.returncode, out=e.stdout)
-        raise HTTPException(status_code=408, detail="Upstream fetch timeout")
+        logger.log("error", "subprocess failed", request_id=request_id, cmd=e.cmd, code=e.returncode, out=(e.stdout or "")[-1000:])
+        raise HTTPException(status_code=500, detail={"stage": "subprocess", "code": e.returncode, "out": (e.stdout or "")[-1000:]})
     except HTTPException:
         raise
     except Exception as e:
         logger.log("error", "exception", request_id=request_id, error=str(e), tb=traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+        raise HTTPException(status_code=500, detail={"stage": "unknown", "error": str(e)})
 
 
 def create_app() -> FastAPI:

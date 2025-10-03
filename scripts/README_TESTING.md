@@ -43,19 +43,17 @@ signature = hmac.new(
 
 ## Testing Scripts
 
-### 1. Comprehensive Test (Python)
+### Unified Orchestrator (Recommended)
 ```bash
-python scripts/test_api_comprehensive.py --env remote --url "https://vm.tiktok.com/ZMAPTWV7o/"
+python scripts/test_e2e.py --remote --url "https://vm.tiktok.com/ZMAPTWV7o/" \
+  --key <API_KEY> --secret <API_SECRET>
 ```
 
-### 2. Simple Test (Python)
-```bash
-python scripts/test_api_simple.py --env remote --url "https://vm.tiktok.com/ZMAPTWV7o/"
-```
-
-### 3. PowerShell Test
+Optional local run (auto-start server, verify cache on second call):
 ```powershell
-.\scripts\test_api.ps1 -Environment remote -TestUrl "https://vm.tiktok.com/ZMAPTWV7o/"
+python scripts/test_e2e.py --local --url "https://vm.tiktok.com/ZMAPTWV7o/" \
+  --key CLIENT_A_KEY_123 --secret CLIENT_A_SECRET_ABC --start-local \
+  --env API_SECRET=CLIENT_A_SECRET_ABC --env API_KEYS_JSON={"CLIENT_A_KEY_123":"test-client"}
 ```
 
 ## Manual Testing
@@ -150,10 +148,11 @@ The test scripts automatically detect the environment:
 
 ```
 scripts/
-├── test_api_comprehensive.py  # Full test suite
-├── test_api_simple.py        # Quick test
-├── test_api.ps1              # PowerShell test
-└── README_TESTING.md         # This file
+├── test_e2e.py                  # Unified orchestrator (preferred)
+├── test_api_comprehensive.py    # Legacy (kept for reference)
+├── test_api_simple.py           # Legacy (kept for reference)
+├── test_api.ps1                 # PowerShell (legacy)
+└── README_TESTING.md            # This file
 ```
 
 ## Deployment Status

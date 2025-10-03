@@ -24,9 +24,9 @@ Config (env)
 
 Notes
 - Avoided circular imports by isolating concerns.
-- Testing scripts unchanged; Dockerfile runs `python main.py`.
+- Testing scripts consolidated: canonical is `scripts/test_e2e.py`; `scripts/test_local.ps1` wraps it for local runs. Legacy testers removed.
 
-Last validated: 2025-10-03
+Last validated: 2025-10-03 (post test script consolidation)
 
 
 - **NEW PUBLIC API**: Implemented FastAPI-based public API with HMAC-SHA256 authentication and rate limiting.
