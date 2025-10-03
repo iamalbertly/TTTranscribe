@@ -1,165 +1,240 @@
----
-title: TTTranscibe
-emoji: 🎧
-colorFrom: indigo
-colorTo: gray
-sdk: docker
-sdk_version: "4.4.0"
-app_file: app.py
-pinned: false
-license: mit
----
+# TTTranscibe - TikTok Video Transcription API
 
-# tiktok-transcriber-mvp
+A FastAPI + Gradio hybrid application that transcribes TikTok videos to text using faster-whisper.
 
-A lean-monolith FastAPI application for fetching TikTok audio, normalizing it with ffmpeg, transcribing with Whisper (CPU-friendly), and persisting metadata to Supabase Postgres and Storage. The project simulates modularity using clear package boundaries without microservices.
+## Features
 
-## Architecture Overview
+- **REST API**: Public API with HMAC-SHA256 authentication
+- **Web UI**: Gradio interface for easy testing
+- **Rate Limiting**: Token bucket algorithm per API key
+- **Structured Logging**: JSON logs with request tracking
+- **Cloud Logging**: Optional Google Cloud Logging integration
 
-- app/api: FastAPI app and HTTP routes. Loads the Whisper tiny model on startup (CPU) using a fixed cache directory for faster cold starts. Performs tool availability checks for `yt-dlp` and `ffprobe` and logs results.
-- app/services: Background-friendly services.
-  - fetchers.py: Resolve TikTok URL to audio using `yt-dlp`. Obeys kill-switch `ALLOW_TIKTOK_ADAPTER`.
-  - normalize.py: Normalize audio via `ffmpeg-python`, enforce duration limits, and compute content hashes.
-  - transcribe.py: Async coroutine to run Whisper on normalized audio and return results.
-- app/store: Data layer abstractions.
-  - db.py: Async Postgres access with `asyncpg` for job CRUD.
-  - storage.py: Minimal Supabase Storage wrapper using `httpx` and REST API.
-- app/core: Cross-cutting concerns.
-  - config.py: Environment loading, defaults, and typed settings.
-  - logging.py: Structured JSON logging with mandatory fields `job_id` and `component`.
-- app/utils: Space for helpers shared across modules.
+## Public API
 
-### Async Pattern
+### Base URLs
 
-Requests enqueue or trigger an async workflow:
-1) Fetch audio from TikTok via `yt-dlp` → write to temp file.
-2) Normalize audio with `ffmpeg`; enforce MAX_AUDIO_SECONDS; compute hash for idempotency.
-3) Transcribe using Whisper tiny (CPU) with cached model weights.
-4) Persist job status and transcript to Postgres via `asyncpg`; store artifacts in Supabase Storage via REST.
+- **Remote**: `https://iamromeoly-tttranscibe.hf.space`
+- **Local dev**: `http://localhost:7860`
 
-The app uses FastAPI lifespan events to initialize shared clients, model, and logging once, and to cleanly close resources on shutdown.
+### Endpoint
 
-## Getting Started
+**POST** `/api/transcribe`
 
-1) Create `.env` from `.env.example` and fill Supabase settings.
-2) Install Python 3.10+ and ffmpeg (ffmpeg/ffprobe must be on PATH). Install `yt-dlp`.
-3) Create and activate a venv, then install requirements:
+### Headers
+
+- `Content-Type: application/json`
+- `X-API-Key: <your-api-key>`
+- `X-Timestamp: <unix-ms>`
+- `X-Signature: <hex-hmac-sha256>`
+
+### Request Body
+
+```json
+{
+  "url": "https://vm.tiktok.com/ZMAPTWV7o/"
+}
 ```
+
+### Signature Generation
+
+```python
+stringToSign = method + "\n" + path + "\n" + body + "\n" + timestamp
+signature = hex(HMAC_SHA256(API_SECRET, stringToSign))
+```
+
+### Success Response (200)
+
+```json
+{
+  "request_id": "uuid",
+  "status": "ok",
+  "lang": "en",
+  "duration_sec": 112.55,
+  "transcript": "Full transcript text...",
+  "transcript_sha256": "f4ab5d3c...",
+  "source": {
+    "canonical_url": "https://www.tiktok.com/@its.factsonly/video/7554590723895594258",
+    "video_id": "7554590723895594258"
+  },
+  "billed_tokens": 1,
+  "elapsed_ms": 3270,
+  "ts": "2025-10-02T18:01:00Z"
+}
+```
+
+### Error Responses
+
+- **400**: Malformed JSON
+- **401**: Missing/unknown X-API-Key
+- **403**: Bad signature or clock skew > 5 minutes
+- **408**: Upstream fetch timeout
+- **429**: Rate limit exceeded (includes Retry-After header)
+- **500**: Internal server error (includes request_id)
+
+### Rate Limits
+
+- **Capacity**: 60 requests per API key
+- **Refill**: 1 token per minute
+- **Retry-After**: Seconds until at least 1 token refills
+
+## Usage Examples
+
+### Shell (macOS/Linux)
+
+```bash
+# Set variables
+API_KEY="key_live_89f590e1f8cd3e4b19cfcf14"
+API_SECRET="b0b5638935304b247195ff2cece8ed3bb307e1728397fce07bd2158866c73fa6"
+BASE_URL="https://iamromeoly-tttranscibe.hf.space"
+TS=$(python - <<'PY'
+import time; print(int(time.time()*1000))
+PY
+)
+BODY='{"url":"https://vm.tiktok.com/ZMAPTWV7o/"}'
+
+# Generate signature
+SIGN_INPUT="POST
+/api/transcribe
+$BODY
+$TS"
+SIG=$(printf "%s" "$SIGN_INPUT" | openssl dgst -sha256 -mac HMAC -macopt key:$API_SECRET | awk '{print $2}')
+
+# Make request
+curl -sS "$BASE_URL/api/transcribe" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -H "X-Timestamp: $TS" \
+  -H "X-Signature: $SIG" \
+  -d "$BODY"
+```
+
+### PowerShell (Windows)
+
+```powershell
+$BaseUrl = "https://iamromeoly-tttranscibe.hf.space"
+$ApiKey  = "key_live_89f590e1f8cd3e4b19cfcf14"
+$Secret  = "b0b5638935304b247195ff2cece8ed3bb307e1728397fce07bd2158866c73fa6"
+$Ts      = [int64]((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalMilliseconds
+$Body    = '{"url":"https://vm.tiktok.com/ZMAPTWV7o/"}'
+$String  = "POST`n/api/transcribe`n$Body`n$Ts"
+
+$hmac = New-Object System.Security.Cryptography.HMACSHA256
+$hmac.Key = [Text.Encoding]::UTF8.GetBytes($Secret)
+$Sig = ($hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($String)) | ForEach-Object ToString x2) -join ""
+$hmac.Dispose()
+
+Invoke-WebRequest -Uri "$BaseUrl/api/transcribe" -Method POST `
+  -Headers @{ "X-API-Key"=$ApiKey; "X-Timestamp"=$Ts; "X-Signature"=$Sig } `
+  -ContentType "application/json" -Body $Body | Select-Object -ExpandProperty Content
+```
+
+### Python
+
+```python
+import hmac
+import hashlib
+import json
+import time
+import requests
+
+# Configuration
+API_KEY = "key_live_89f590e1f8cd3e4b19cfcf14"
+API_SECRET = "b0b5638935304b247195ff2cece8ed3bb307e1728397fce07bd2158866c73fa6"
+BASE_URL = "https://iamromeoly-tttranscibe.hf.space"
+
+# Generate signature
+timestamp = int(time.time() * 1000)
+body = {"url": "https://vm.tiktok.com/ZMAPTWV7o/"}
+body_json = json.dumps(body)
+
+string_to_sign = f"POST\n/api/transcribe\n{body_json}\n{timestamp}"
+signature = hmac.new(
+    API_SECRET.encode('utf-8'),
+    string_to_sign.encode('utf-8'),
+    hashlib.sha256
+).hexdigest()
+
+# Make request
+headers = {
+    "Content-Type": "application/json",
+    "X-API-Key": API_KEY,
+    "X-Timestamp": str(timestamp),
+    "X-Signature": signature
+}
+
+response = requests.post(f"{BASE_URL}/api/transcribe", headers=headers, json=body)
+print(response.json())
+```
+
+## Local Development
+
+### Prerequisites
+
+- Python 3.11+
+- ffmpeg
+- yt-dlp
+
+### Installation
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd tiktok-transciber-mvp
+
+# Install dependencies
 pip install -r requirements.txt
-```
-4) Run the app:
-```
+
+# Run locally
 python main.py
 ```
 
-## Windows 11 quickstart (recommended Python 3.11)
+The application will be available at `http://localhost:7860`
 
-For reliable local E2E on Windows:
+## Deployment
 
-1) Create venv on Python 3.11 and upgrade pip
-```
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-```
+### Hugging Face Spaces
 
-2) Install core web deps and tools using constraints for Torch CPU
-```
-pip install -r requirements.txt -c constraints.win-py311.txt
-```
+The application is deployed to Hugging Face Spaces with the following environment variables:
 
-3) Install faster-whisper after Torch is in place
-```
-pip install faster-whisper==1.0.3
-```
+- `API_SECRET`: Shared HMAC secret
+- `API_KEYS_JSON`: JSON map of API keys to owners
+- `RATE_LIMIT_CAPACITY`: Token bucket capacity (default: 60)
+- `RATE_LIMIT_REFILL_PER_MIN`: Tokens per minute refill (default: 1)
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to GCP service account key
+- `GCP_PROJECT_ID`: Google Cloud project ID
+- `GCP_LOG_NAME`: Cloud logging log name
 
-4) Start the app:
-```
-$env:WHISPER_MODEL='tiny'
-$env:WHISPER_CACHE_DIR="$PWD\whisper_models_cache"
-python main.py
+### Docker
+
+```bash
+# Build image
+docker build -t tiktok-transcriber .
+
+# Run container
+docker run -p 7860:7860 tiktok-transcriber
 ```
 
-5) Test the app by opening http://127.0.0.1:7860 in your browser and entering a TikTok URL
+## Architecture
 
-Notes:
-- `WHISPER_CACHE_DIR` defaults to `whisper-cache/` if not set.
-- `/health` is fast and non-blocking; it does not wait for model downloads or network checks.
+- **FastAPI**: REST API with authentication and rate limiting
+- **Gradio**: Web UI for testing and demonstration
+- **faster-whisper**: CPU-optimized transcription
+- **yt-dlp**: TikTok video audio extraction
+- **ffmpeg**: Audio processing and normalization
 
-## Deploy to Hugging Face Spaces (Docker)
+## Testing
 
-1) Create a new public Space with the Docker runtime.
-2) Push this repo to the Space (or connect via GitHub).
-3) In Space Settings → Secrets, set:
-   - SUPABASE_URL
-   - SUPABASE_ANON_KEY
-   - SUPABASE_SERVICE_ROLE_KEY
-   - SUPABASE_STORAGE_BUCKET
-   - Optionally ALLOW_TIKTOK_ADAPTER=false to disable TikTok fetcher
-   - Optionally ALLOW_UPLOAD_ADAPTER=true to enable file uploads
-4) The container serves on port 7860. Open the URL in your browser to use the Gradio interface.
+### Health Check
 
-The app now uses a simple synchronous approach - no database or external services required.
-
-## Database Schema (No longer needed)
-
-The app now uses a simple synchronous approach without database dependencies.
-
-### Safe deploy using env token (no secrets in repo)
-
-- Preferred: set token in env and run the tracked deploy script:
-  - PowerShell: `$env:HUGGINGFACE_HUB_TOKEN='hf_...'`
-  - Then: `.\u0063scripts\deploy_remote.ps1`
-- Or use the ignored local wrapper that stores your default token locally:
-  - `.\u0073ripts\deploy_remote.local.ps1`
-
-The deploy script will:
-- Auto-commit dirty changes (if `-AutoCommit`) and stash remaining, rebase, and if conflicts occur it aborts rebase and retries with `--force-with-lease`.
-- Temporarily move only `scripts/*.local.ps1` files to avoid rebase overwriting and restore them afterward.
-- Print a clear error if push still fails.
-
-If the Space rejects pushes because history contains a token in `scripts/deploy_remote.ps1`, fix by pushing a clean branch with no secret history:
-
-Fastest path (new clean branch):
-```powershell
-git checkout --orphan deploy-clean
-git add -A
-git commit -m "chore(deploy): clean branch without secrets"
-git push origin deploy-clean --force-with-lease
+```bash
+curl https://iamromeoly-tttranscibe.hf.space/health
 ```
-Point the Space to `deploy-clean` or push to the Space remote from this branch.
 
-Alternative (keep branch name but purge history):
-```powershell
-git checkout --orphan main-clean
-git add -A
-git commit -m "chore(deploy): clean history"
-git branch -M main-clean main
-git push origin main --force-with-lease
-```
-After the remote branch no longer contains token-bearing commits, deploys will succeed using env-based token.
+### API Test
 
-## Simple Gradio Interface
+Use the provided examples above or run the test scripts in the `scripts/` directory.
 
-The app now uses a direct Gradio interface where users can:
-- Enter a TikTok URL
-- Click "Transcribe" 
-- See the transcript appear immediately
-- No API endpoints or polling required
+## License
 
-### Web Interface
-
-The app provides a simple web interface where users can:
-- Enter a TikTok URL in the text box
-- Click the "Transcribe" button
-- Watch progress updates: "Expanding URL" → "Fetching audio" → "Converting to WAV" → "Transcribing" → "Done"
-- See the full transcript appear in the text area
-- Copy the transcript text directly from the interface
-
-## Notes
-
-- Designed for Windows 11 local dev and Hugging Face CPU Basic. Whisper runs on CPU; tiny model loaded once at startup.
-- Logging is JSON and always includes `job_id` and `component` to trace workflows end-to-end.
-- This is a lean monolith: modular folders, single deployable.
-
-
+MIT License

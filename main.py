@@ -39,15 +39,37 @@ class UILogHandler:
 
 logger = UILogHandler("tttranscribe")
 
+# Optional Google Cloud Logging (mirrors stdout JSON logs if configured)
+GCP_LOGGER = None
+try:
+    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        try:
+            from google.cloud import logging as gcp_logging
+            _gcp_client = gcp_logging.Client(project=os.getenv("GCP_PROJECT_ID", "tttranscibe-project-64857"))
+            GCP_LOGGER = _gcp_client.logger(os.getenv("GCP_LOG_NAME", "tttranscibe"))
+        except Exception as _gcp_err:
+            print(json.dumps({
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.gmtime()),
+                "level": "WARNING",
+                "logger": "tttranscribe",
+                "msg": "gcp_logging_init_failed",
+                "error": str(_gcp_err)
+            }), file=sys.stdout, flush=True)
+except Exception:
+    pass
+
 def read_logs():
     return "\n".join(LOGS)
 
 # ===============  C) API Configuration  ======================================
-# API Keys and secrets (in production, load from environment)
-API_KEYS = {
-    "CLIENT_A_KEY_123": "CLIENT_A_SECRET_ABC",
-    # Add more client keys as needed
-}
+# Environment-driven auth & keys
+API_SECRET = os.getenv("API_SECRET", "")
+_keys_raw = os.getenv("API_KEYS_JSON", "{}")
+try:
+    API_KEYS_OWNER_MAP: dict[str, str] = json.loads(_keys_raw)
+except Exception:
+    API_KEYS_OWNER_MAP = {}
+ALLOWED_API_KEYS = set(API_KEYS_OWNER_MAP.keys())
 
 # Rate limiting: token bucket per API key
 class TokenBucket:
@@ -70,12 +92,16 @@ class TokenBucket:
                 return True
             return False
 
-# Rate limiters per API key (5 requests per minute = 1/12 per second)
+# Rate limiting from env
+_capacity = int(os.getenv("RATE_LIMIT_CAPACITY", "60"))
+_refill_per_min = float(os.getenv("RATE_LIMIT_REFILL_PER_MIN", "1"))
+_refill_rate_per_sec = _refill_per_min / 60.0
+
 rate_limiters: Dict[str, TokenBucket] = {}
 
 def get_rate_limiter(api_key: str) -> TokenBucket:
     if api_key not in rate_limiters:
-        rate_limiters[api_key] = TokenBucket(capacity=5, refill_rate=1/12)  # 5 per minute
+        rate_limiters[api_key] = TokenBucket(capacity=_capacity, refill_rate=_refill_rate_per_sec)
     return rate_limiters[api_key]
 
 # ===============  D) API Models  ======================================
@@ -99,19 +125,16 @@ class ErrorResponse(BaseModel):
     request_id: Optional[str] = None
 
 # ===============  E) Authentication  ======================================
-def verify_signature(api_key: str, timestamp: int, signature: str, method: str, path: str, body: str) -> bool:
-    """Verify HMAC-SHA256 signature"""
-    if api_key not in API_KEYS:
+def verify_signature_shared(secret: str, timestamp: int, signature: str, method: str, path: str, body_raw_str: str) -> bool:
+    """Verify HMAC-SHA256 signature using a shared API_SECRET over RAW body bytes."""
+    if not secret:
         return False
-    
-    secret = API_KEYS[api_key]
-    string_to_sign = f"{method}\n{path}\n{body}\n{timestamp}"
+    string_to_sign = f"{method}\n{path}\n{body_raw_str}\n{timestamp}"
     expected_signature = hmac.new(
-        secret.encode('utf-8'),
-        string_to_sign.encode('utf-8'),
+        secret.encode("utf-8"),
+        string_to_sign.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
-    
     return hmac.compare_digest(signature, expected_signature)
 
 def verify_timestamp(timestamp: int) -> bool:
@@ -282,14 +305,14 @@ def transcribe_wav(path: str) -> tuple[str, str, float]:
         return "Mock transcript: This is a test transcription since faster-whisper is not available.", "en", 0.0
     
     try:
-        segments, info = _whisper.transcribe(path, beam_size=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500))
-        parts = []
-        for seg in segments:
-            parts.append(seg.text.strip())
-        text = " ".join(p for p in parts if p)
-        # Also print the transcript to logs for verification
-        logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
-        # If you want the full transcript in logs, remove slice [:1000]
+    segments, info = _whisper.transcribe(path, beam_size=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500))
+    parts = []
+    for seg in segments:
+        parts.append(seg.text.strip())
+    text = " ".join(p for p in parts if p)
+    # Also print the transcript to logs for verification
+    logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
+    # If you want the full transcript in logs, remove slice [:1000]
         return text, info.language, info.duration
     except Exception as e:
         logger.log("error", "whisper transcription failed", error=str(e))
@@ -399,44 +422,44 @@ app.add_middleware(
 
 @app.post("/api/transcribe", response_model=TranscribeResponse)
 async def transcribe(
-    request: TranscribeRequest,
+    request: Request,
     x_api_key: str = Header(..., alias="X-API-Key"),
-    x_timestamp: int = Header(..., alias="X-Timestamp"),
+    x_timestamp: str = Header(..., alias="X-Timestamp"),
     x_signature: str = Header(..., alias="X-Signature")
 ):
     """Transcribe TikTok video to text"""
-    
-    # Verify API key
-    if x_api_key not in API_KEYS:
+    # Verify API key existence
+    if x_api_key not in ALLOWED_API_KEYS:
         raise HTTPException(status_code=401, detail="Unknown API key")
-    
-    # Verify timestamp
-    if not verify_timestamp(x_timestamp):
+    # Verify timestamp skew
+    try:
+        ts_val = int(x_timestamp)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid timestamp header")
+    if not verify_timestamp(ts_val):
         raise HTTPException(status_code=403, detail="Timestamp skew too large")
-    
-    # Verify signature - try multiple JSON formats
-    body_dict = request.dict()
-    body_json_variants = [
-        json.dumps(body_dict),
-        json.dumps(body_dict, separators=(',', ':')),
-        json.dumps(body_dict, sort_keys=True),
-        json.dumps(body_dict, separators=(',', ':'), sort_keys=True)
-    ]
-    
-    signature_valid = False
-    for body_json in body_json_variants:
-        if verify_signature(x_api_key, x_timestamp, x_signature, "POST", "/api/transcribe", body_json):
-            signature_valid = True
-            break
-    
-    if not signature_valid:
+    # Read RAW body exactly as sent
+    raw_bytes = await request.body()
+    try:
+        raw_str = raw_bytes.decode("utf-8")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed body encoding")
+
+    # Verify signature using shared API_SECRET
+    if not verify_signature_shared(API_SECRET, ts_val, x_signature, "POST", "/api/transcribe", raw_str):
         raise HTTPException(status_code=403, detail="Invalid signature")
-    
+    # Parse JSON after successful auth
+    try:
+        payload = json.loads(raw_str)
+        url = payload["url"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed JSON body")
+
     # Check rate limit
     rate_limiter = get_rate_limiter(x_api_key)
     if not rate_limiter.consume():
-        # Calculate retry after seconds
-        retry_after = int(60 / rate_limiter.refill_rate)  # seconds until bucket refills
+        # Calculate seconds until at least 1 token refills
+        retry_after = max(1, int(1 / rate_limiter.refill_rate))
         response = JSONResponse(
             status_code=429,
             content={"error": "Rate limit exceeded"},
@@ -446,7 +469,26 @@ async def transcribe(
     
     # Process the request
     try:
-        result = process_tiktok_url(request.url)
+        start_ms = int(time.time() * 1000)
+        result = process_tiktok_url(url)
+        elapsed_ms = int(time.time() * 1000) - start_ms
+        owner = API_KEYS_OWNER_MAP.get(x_api_key, "unknown")
+        # Structured summary log
+        logger.log("info", "api_transcribe_ok", request_id=result.request_id, key_owner=owner, duration_ms=elapsed_ms, transcript_sha12=result.transcript_sha256[:12])
+        if GCP_LOGGER is not None:
+            try:
+                GCP_LOGGER.log_struct({
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.gmtime()),
+                    "level": "INFO",
+                    "logger": "tttranscribe",
+                    "msg": "api_transcribe_ok",
+                    "request_id": result.request_id,
+                    "key_owner": owner,
+                    "duration_ms": elapsed_ms,
+                    "transcript_sha12": result.transcript_sha256[:12]
+                }, severity="INFO")
+            except Exception:
+                pass
         return result
     except HTTPException:
         raise
@@ -531,5 +573,5 @@ app = gr.mount_gradio_app(app, demo, path="/")
 
 if __name__ == "__main__":
     import uvicorn
-    demo.queue(max_size=8)
+demo.queue(max_size=8)
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))
