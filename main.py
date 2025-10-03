@@ -303,16 +303,21 @@ def transcribe_wav(path: str) -> tuple[str, str, float]:
     if _whisper is None:
         logger.log("warning", "faster-whisper not available, returning mock transcript")
         return "Mock transcript: This is a test transcription since faster-whisper is not available.", "en", 0.0
-    
+
     try:
-    segments, info = _whisper.transcribe(path, beam_size=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500))
-    parts = []
-    for seg in segments:
-        parts.append(seg.text.strip())
-    text = " ".join(p for p in parts if p)
-    # Also print the transcript to logs for verification
-    logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
-    # If you want the full transcript in logs, remove slice [:1000]
+        segments, info = _whisper.transcribe(
+            path,
+            beam_size=1,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500)
+        )
+        parts = []
+        for seg in segments:
+            parts.append(seg.text.strip())
+        text = " ".join(p for p in parts if p)
+        # Also print the transcript to logs for verification
+        logger.log("info", "transcription complete", lang=info.language, duration=info.duration, transcript=text[:1000])
+        # If you want the full transcript in logs, remove slice [:1000]
         return text, info.language, info.duration
     except Exception as e:
         logger.log("error", "whisper transcription failed", error=str(e))
@@ -573,5 +578,5 @@ app = gr.mount_gradio_app(app, demo, path="/")
 
 if __name__ == "__main__":
     import uvicorn
-demo.queue(max_size=8)
+    demo.queue(max_size=8)
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 7860)))
