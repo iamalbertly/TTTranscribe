@@ -69,6 +69,14 @@ def _write_cache(expanded_url: str, payload: dict) -> None:
 
 
 logger = UILogHandler("tttranscribe")
+def _git_sha() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
+    except Exception:
+        return os.getenv("GIT_REV", "unknown")
+
+GIT_REV = _git_sha()
+
 
 
 class TranscribeRequest(BaseModel):
@@ -86,6 +94,7 @@ class TranscribeResponse(BaseModel):
     billed_tokens: int
     elapsed_ms: int
     ts: str
+    job_id: Optional[str] = None
 
 
 def process_tiktok_url(url: str) -> TranscribeResponse:
@@ -134,11 +143,12 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
         elapsed_ms = int((time.time() - start_time) * 1000)
         logger.log(
             "info",
-            "transcription complete",
+            "transcription_complete",
             request_id=request_id,
             duration=duration,
             language=language,
             transcript_length=len(transcript),
+            elapsed_ms=elapsed_ms,
         )
 
         result = TranscribeResponse(
@@ -180,6 +190,37 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="TTTranscibe API", version="1.0.0")
+    print(f"===== Application Startup (git {GIT_REV}) =====", flush=True)
+    # In-memory jobs ledger for simple observability
+    from threading import Lock
+    from collections import deque
+
+    JOBS = {}
+    JOBS_ORDER = deque(maxlen=500)
+    JOBS_LOCK = Lock()
+
+    def _new_job(url: str) -> str:
+        jid = str(uuid.uuid4())
+        with JOBS_LOCK:
+            JOBS[jid] = {
+                "job_id": jid,
+                "status": "PENDING",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "url": url,
+                "cache_hit": False,
+                "elapsed_ms": None,
+                "error": None,
+            }
+            JOBS_ORDER.appendleft(jid)
+        return jid
+
+    def _set_job(jid: str, **fields) -> None:
+        with JOBS_LOCK:
+            if jid in JOBS:
+                JOBS[jid].update(fields)
+                JOBS[jid]["updated_at"] = time.time()
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -219,13 +260,25 @@ def create_app() -> FastAPI:
         except Exception:
             raise HTTPException(status_code=400, detail="Malformed JSON body")
 
-        rate_limiter = get_rate_limiter(x_api_key)
+        # Global token bucket (per Space); for per-key buckets, shard by key in rate_limit module
+        rate_limiter = get_rate_limiter()
         if not rate_limiter.consume():
             retry_after = max(1, int(1 / rate_limiter.refill_rate))
             return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"}, headers={"Retry-After": str(retry_after)})
 
+        # Observe basic job lifecycle alongside synchronous flow
+        job_id = _new_job(url)
+        _set_job(job_id, status="RUNNING")
+
         start_ms = int(time.time() * 1000)
-        result = process_tiktok_url(url)
+        try:
+            result = process_tiktok_url(url)
+        except HTTPException as he:
+            _set_job(job_id, status="FAILED", error=str(he.detail))
+            raise
+        except Exception as e:
+            _set_job(job_id, status="FAILED", error=str(e))
+            raise
         elapsed_ms = int(time.time() * 1000) - start_ms
         owner = API_KEYS_OWNER_MAP.get(x_api_key, "unknown")
         logger.log(
@@ -236,6 +289,8 @@ def create_app() -> FastAPI:
             duration_ms=elapsed_ms,
             transcript_sha12=result.transcript_sha256[:12],
         )
+        # Update job completion status
+        _set_job(job_id, status="COMPLETE", cache_hit=(result.billed_tokens == 0), elapsed_ms=elapsed_ms)
         if GCP_LOGGER is not None:
             try:
                 GCP_LOGGER.log_struct(
@@ -253,11 +308,85 @@ def create_app() -> FastAPI:
                 )
             except Exception:
                 pass
+        # Attach job_id for observability (now part of response model)
+        try:
+            result.job_id = job_id  # type: ignore[attr-defined]
+        except Exception:
+            pass
         return result
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {
+            "status": "ok",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "build": {"git_sha": GIT_REV},
+        }
+
+    @app.get("/version")
+    async def version():
+        return {"git_sha": GIT_REV, "started_at": datetime.now(timezone.utc).isoformat()}
+
+    @app.get("/queue/status")
+    async def queue_status():
+        try:
+            with JOBS_LOCK:
+                qsize = sum(1 for j in JOBS.values() if j["status"] in ("PENDING", "RUNNING"))
+                active = sum(1 for j in JOBS.values() if j["status"] == "RUNNING")
+            return {
+                "status": "ok",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "msg": "estimation",
+                "event_id": None,
+                "rank": None,
+                "queue_size": qsize,
+                "rank_eta": None,
+                "queue": {
+                    "queue_size": qsize,
+                    "active_jobs": active,
+                    "estimated_wait_time": 0 if qsize == 0 else 5 * qsize,
+                    "status": "idle" if qsize == 0 else "busy",
+                },
+            }
+        except Exception as e:
+            logger.log("error", "queue_status_failed", error=str(e))
+            return {"status": "error", "error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    @app.get("/jobs")
+    async def jobs_summary():
+        with JOBS_LOCK:
+            total = len(JOBS)
+            counts = {"PENDING": 0, "RUNNING": 0, "COMPLETE": 0, "FAILED": 0}
+            for j in JOBS.values():
+                if j["status"] in counts:
+                    counts[j["status"]] += 1
+            recent = [JOBS[jid] for jid in list(JOBS_ORDER)[:25]]
+        return {
+            "total": total,
+            "pending": counts["PENDING"],
+            "running": counts["RUNNING"],
+            "complete": counts["COMPLETE"],
+            "failed": counts["FAILED"],
+            "recent": recent,
+        }
+
+    @app.get("/jobs/failed")
+    async def jobs_failed():
+        with JOBS_LOCK:
+            items = [j for j in JOBS.values() if j["status"] == "FAILED"]
+        return {"jobs": items}
+
+    @app.post("/jobs/repair")
+    async def jobs_repair():
+        now = time.time()
+        repaired = 0
+        with JOBS_LOCK:
+            for j in JOBS.values():
+                if j["status"] == "PENDING" and (now - j["created_at"]) > 600:
+                    j["status"] = "FAILED"
+                    j["updated_at"] = now
+                    repaired += 1
+        return {"status": "ok", "repaired": repaired}
 
     def transcribe_url(url: str, progress=gr.Progress()):
         try:
