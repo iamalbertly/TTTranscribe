@@ -8,12 +8,14 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from .logging_utils import UILogHandler, read_logs, GCP_LOGGER
+from .logging_utils import UILogHandler, GCP_LOGGER
 from .auth import API_SECRET, ALLOWED_API_KEYS, API_KEYS_OWNER_MAP, verify_signature_shared, verify_timestamp
 from .rate_limit import get_rate_limiter
 from .network import expand_tiktok_url
 from .media import yt_dlp_m4a, to_wav_normalized
 from .transcription import transcribe_wav
+from .jobs import JobsRegistry, mount_job_endpoints
+from .ui import build_gradio_ui
 
 # Simple filesystem cache to avoid regenerating recent transcripts
 CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", "/data/transcripts_cache")
@@ -206,27 +208,7 @@ def create_app() -> FastAPI:
     JOBS_ORDER = deque(maxlen=500)
     JOBS_LOCK = Lock()
 
-    def _new_job(url: str) -> str:
-        jid = str(uuid.uuid4())
-        with JOBS_LOCK:
-            JOBS[jid] = {
-                "job_id": jid,
-                "status": "PENDING",
-                "created_at": time.time(),
-                "updated_at": time.time(),
-                "url": url,
-                "cache_hit": False,
-                "elapsed_ms": None,
-                "error": None,
-            }
-            JOBS_ORDER.appendleft(jid)
-        return jid
-
-    def _set_job(jid: str, **fields) -> None:
-        with JOBS_LOCK:
-            if jid in JOBS:
-                JOBS[jid].update(fields)
-                JOBS[jid]["updated_at"] = time.time()
+    registry = JobsRegistry()
 
     app.add_middleware(
         CORSMiddleware,
@@ -274,17 +256,18 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"}, headers={"Retry-After": str(retry_after)})
 
         # Observe basic job lifecycle alongside synchronous flow
-        job_id = _new_job(url)
-        _set_job(job_id, status="RUNNING")
+        job_id = str(uuid.uuid4())
+        registry.new_job(job_id, url)
+        registry.set_job(job_id, status="RUNNING")
 
         start_ms = int(time.time() * 1000)
         try:
             result = process_tiktok_url(url)
         except HTTPException as he:
-            _set_job(job_id, status="FAILED", error=str(he.detail))
+            registry.set_job(job_id, status="FAILED", error=str(he.detail))
             raise
         except Exception as e:
-            _set_job(job_id, status="FAILED", error=str(e))
+            registry.set_job(job_id, status="FAILED", error=str(e))
             raise
         elapsed_ms = int(time.time() * 1000) - start_ms
         owner = API_KEYS_OWNER_MAP.get(x_api_key, "unknown")
@@ -297,7 +280,7 @@ def create_app() -> FastAPI:
             transcript_sha12=result.transcript_sha256[:12],
         )
         # Update job completion status
-        _set_job(job_id, status="COMPLETE", cache_hit=(result.billed_tokens == 0), elapsed_ms=elapsed_ms)
+        registry.set_job(job_id, status="COMPLETE", cache_hit=(result.billed_tokens == 0), elapsed_ms=elapsed_ms)
         if GCP_LOGGER is not None:
             try:
                 GCP_LOGGER.log_struct(
@@ -334,66 +317,7 @@ def create_app() -> FastAPI:
     async def version():
         return {"git_sha": GIT_REV, "started_at": datetime.now(timezone.utc).isoformat(), "build_time": _STAMPED_TIME or "unknown"}
 
-    @app.get("/queue/status")
-    async def queue_status():
-        try:
-            with JOBS_LOCK:
-                qsize = sum(1 for j in JOBS.values() if j["status"] in ("PENDING", "RUNNING"))
-                active = sum(1 for j in JOBS.values() if j["status"] == "RUNNING")
-            return {
-                "status": "ok",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "msg": "estimation",
-                "event_id": None,
-                "rank": None,
-                "queue_size": qsize,
-                "rank_eta": None,
-                "queue": {
-                    "queue_size": qsize,
-                    "active_jobs": active,
-                    "estimated_wait_time": 0 if qsize == 0 else 5 * qsize,
-                    "status": "idle" if qsize == 0 else "busy",
-                },
-            }
-        except Exception as e:
-            logger.log("error", "queue_status_failed", error=str(e))
-            return {"status": "error", "error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
-
-    @app.get("/jobs")
-    async def jobs_summary():
-        with JOBS_LOCK:
-            total = len(JOBS)
-            counts = {"PENDING": 0, "RUNNING": 0, "COMPLETE": 0, "FAILED": 0}
-            for j in JOBS.values():
-                if j["status"] in counts:
-                    counts[j["status"]] += 1
-            recent = [JOBS[jid] for jid in list(JOBS_ORDER)[:25]]
-        return {
-            "total": total,
-            "pending": counts["PENDING"],
-            "running": counts["RUNNING"],
-            "complete": counts["COMPLETE"],
-            "failed": counts["FAILED"],
-            "recent": recent,
-        }
-
-    @app.get("/jobs/failed")
-    async def jobs_failed():
-        with JOBS_LOCK:
-            items = [j for j in JOBS.values() if j["status"] == "FAILED"]
-        return {"jobs": items}
-
-    @app.post("/jobs/repair")
-    async def jobs_repair():
-        now = time.time()
-        repaired = 0
-        with JOBS_LOCK:
-            for j in JOBS.values():
-                if j["status"] == "PENDING" and (now - j["created_at"]) > 600:
-                    j["status"] = "FAILED"
-                    j["updated_at"] = now
-                    repaired += 1
-        return {"status": "ok", "repaired": repaired}
+    mount_job_endpoints(app, registry, logger)
 
     def transcribe_url(url: str, progress=gr.Progress()):
         try:
@@ -430,20 +354,7 @@ def create_app() -> FastAPI:
             logger.log("error", "exception", error=str(e), tb=traceback.format_exc())
             return f"[Exception] {e}", "Error"
 
-    with gr.Blocks(title="TTTranscibe") as demo:
-        gr.Markdown("### TikTok → Transcript, with live server logs")
-        url_in = gr.Textbox(label="TikTok URL", placeholder="https://vm.tiktok.com/...")
-        with gr.Row():
-            go = gr.Button("Transcribe", variant="primary")
-            status = gr.Textbox(label="Status", value="Idle", interactive=False)
-        transcript = gr.Textbox(label="Transcript", lines=12)
-        logs = gr.Textbox(label="Server log (live)", lines=16, interactive=False)
-        go.click(fn=transcribe_url, inputs=[url_in], outputs=[transcript, status], concurrency_limit=1)
-        try:
-            demo.poll(fn=read_logs, outputs=[logs], every=0.5)
-        except Exception:
-            pass
-
+    demo = build_gradio_ui()
     app = gr.mount_gradio_app(app, demo, path="/")
     return app
 
