@@ -195,9 +195,16 @@ cd tiktok-transciber-mvp
 
 # Install dependencies
 pip install -r requirements.txt
+<<<<<<< HEAD
 
 # Run locally (single entrypoint)
 uvicorn app:app --host 0.0.0.0 --port 7860
+=======
+```
+4) Run the app:
+```
+python main.py
+>>>>>>> b5b28564 (CI deploy - 2025-10-02 21:20:45)
 ```
 
 The application will be available at `http://localhost:7860`
@@ -246,9 +253,297 @@ docker run -p 7860:7860 tiktok-transcriber
 curl https://iamromeoly-tttranscibe.hf.space/health
 ```
 
+<<<<<<< HEAD
 ### API Test
 
 Use the provided examples above or run the test scripts in the `scripts/` directory.
+=======
+3) Install faster-whisper after Torch is in place
+```
+pip install faster-whisper==1.0.3
+```
+
+4) Start the app:
+```
+$env:WHISPER_MODEL='tiny'
+$env:WHISPER_CACHE_DIR="$PWD\whisper_models_cache"
+python main.py
+```
+
+5) Test the app by opening http://127.0.0.1:7860 in your browser and entering a TikTok URL
+
+Notes:
+- `WHISPER_CACHE_DIR` defaults to `whisper-cache/` if not set.
+- `/health` is fast and non-blocking; it does not wait for model downloads or network checks.
+
+## Deploy to Hugging Face Spaces (Docker)
+
+1) Create a new public Space with the Docker runtime.
+2) Push this repo to the Space (or connect via GitHub).
+3) In Space Settings → Secrets, set:
+   - SUPABASE_URL
+   - SUPABASE_ANON_KEY
+   - SUPABASE_SERVICE_ROLE_KEY
+   - SUPABASE_STORAGE_BUCKET
+   - Optionally ALLOW_TIKTOK_ADAPTER=false to disable TikTok fetcher
+   - Optionally ALLOW_UPLOAD_ADAPTER=true to enable file uploads
+4) The container serves on port 7860. Test endpoints:
+   - GET /health
+   - POST /transcribe (short TikTok URL)
+
+Next step: If TikTok fetching becomes unreliable, set `ALLOW_TIKTOK_ADAPTER=false` and use the optional upload path to provide audio directly. The upload path stores files privately in Supabase Storage, then runs normalization + transcription.
+
+## Apply schema in Supabase SQL Editor
+
+1) Open Supabase project → SQL Editor.
+2) Paste contents of `db/migrations.sql`.
+3) Run once to provision `jobs` and `assets` tables and triggers.
+
+### CI-based Migrations (Supabase CLI)
+
+- Use the GitHub workflow `Supabase Migrate` to apply `db/migrations.sql` to your Supabase project.
+- It is a `workflow_dispatch` with input `confirm` (boolean). When `confirm=true`, it runs `supabase db push`; otherwise it prints a dry run message.
+- Required repository secrets:
+  - `SUPABASE_ACCESS_TOKEN`
+  - `SUPABASE_PROJECT_REF`
+  - Any database password the CLI may prompt for (managed on Supabase side; CLI uses access token + ref).
+
+### Safe deploy using env token (no secrets in repo)
+
+- Preferred: set token in env and run the tracked deploy script:
+  - PowerShell: `$env:HUGGINGFACE_HUB_TOKEN='hf_...'`
+  - Then: `.\u0063scripts\deploy_remote.ps1`
+- Or use the ignored local wrapper that stores your default token locally:
+  - `.\u0073ripts\deploy_remote.local.ps1`
+
+The deploy script will:
+- Auto-commit dirty changes (if `-AutoCommit`) and stash remaining, rebase, and if conflicts occur it aborts rebase and retries with `--force-with-lease`.
+- Temporarily move only `scripts/*.local.ps1` files to avoid rebase overwriting and restore them afterward.
+- Print a clear error if push still fails.
+
+If the Space rejects pushes because history contains a token in `scripts/deploy_remote.ps1`, fix by pushing a clean branch with no secret history:
+
+Fastest path (new clean branch):
+```powershell
+git checkout --orphan deploy-clean
+git add -A
+git commit -m "chore(deploy): clean branch without secrets"
+git push origin deploy-clean --force-with-lease
+```
+Point the Space to `deploy-clean` or push to the Space remote from this branch.
+
+Alternative (keep branch name but purge history):
+```powershell
+git checkout --orphan main-clean
+git add -A
+git commit -m "chore(deploy): clean history"
+git branch -M main-clean main
+git push origin main --force-with-lease
+```
+After the remote branch no longer contains token-bearing commits, deploys will succeed using env-based token.
+
+## API and Polling Pattern
+
+### Core Endpoints
+
+- `GET /health`: Returns JSON with Whisper model name, tool presence (yt-dlp, ffprobe), database connectivity, `queue_counts`, `lease_stats`, `last_error`.
+- `POST /transcribe`: Body `{ "url": "https://www.tiktok.com/...", "idempotency_key": "optional" }`.
+  - Expands and normalizes URL, checks cache; if both audio/transcript exist, returns COMPLETE immediately.
+  - Otherwise enqueues job and returns `202 { job_id }`.
+- `GET /transcribe/{job_id}`: Returns
+  - `{"status":"PENDING"}` or `{"status":"RUNNING"}` during processing
+  - `200 { status: "COMPLETE", job_id, audio_url, transcript_url, text_preview, text, data: { transcription_storage_key, cache_hit, content_hash } }`
+  - On failure: `4xx/5xx { status: "FAILED", job_id, code, message, raw_error }`
+- `GET /transcript/{job_id}`: Returns the full transcript text and metadata for completed jobs
+  - `200 { job_id, text, source_url, created_at, model, content_hash }`
+  - Returns `404` if job not found or `400` if transcript not ready yet
+
+### Android App Integration
+
+For Android apps, use this pattern to get TikTok transcripts:
+
+1. **Submit transcription job:**
+   ```http
+   POST https://iamromeoly-TTTranscibe.hf.space/transcribe
+   Content-Type: application/json
+   
+   {
+     "url": "https://vm.tiktok.com/ZMADQVF4e/"
+   }
+   ```
+
+2. **Poll for completion:**
+   ```http
+   GET https://iamromeoly-TTTranscibe.hf.space/transcribe/{job_id}
+   ```
+
+3. **Get full transcript (when status is "COMPLETE"):**
+   ```http
+   GET https://iamromeoly-TTTranscibe.hf.space/transcript/{job_id}
+   ```
+
+**Response format for completed transcription:**
+```json
+{
+  "job_id": "3181c7f6-31b9-468e-9b4f-8a2d35cf6bd8",
+  "text": "After a man cheats, the first thing that changes is how he sees his wife, everything she does starts to annoy him. Her voice grates on him, her habits discuss him. Even her kindness makes him roll his eyes...",
+  "source_url": "https://www.tiktok.com/@user/video/1234567890",
+  "created_at": "2025-09-27T21:35:14Z",
+  "model": "tiny",
+  "content_hash": "810009481bd1f8fa608195aad7c85d2bc7e43dfa03e14cfc675434de6e070649"
+}
+```
+
+**Alternative: Get transcript from main endpoint:**
+The `/transcribe/{job_id}` endpoint now includes the full transcript in the `text` field when status is "COMPLETE":
+
+```json
+{
+  "status": "COMPLETE",
+  "job_id": "3181c7f6-31b9-468e-9b4f-8a2d35cf6bd8",
+  "text": "Full transcript text here...",
+  "text_preview": "After a man cheats, the first thing...",
+  "audio_url": "/files/audio/810009481bd1f8fa608195aad7c85d2bc7e43dfa03e14cfc675434de6e070649.wav",
+  "transcript_url": "/files/transcripts/810009481bd1f8fa608195aad7c85d2bc7e43dfa03e14cfc675434de6e070649.json"
+}
+```
+
+### Android Integration Example
+
+Here's a complete example of how to integrate with the API from an Android app:
+
+```kotlin
+// Android Kotlin example
+class TikTokTranscriber {
+    private val baseUrl = "https://iamromeoly-TTTranscibe.hf.space"
+    
+    suspend fun transcribeTikTok(url: String): String? {
+        // Step 1: Submit transcription job
+        val jobId = submitTranscription(url)
+        if (jobId == null) return null
+        
+        // Step 2: Poll for completion
+        return pollForCompletion(jobId)
+    }
+    
+    private suspend fun submitTranscription(url: String): String? {
+        try {
+            val response = httpClient.post("$baseUrl/transcribe") {
+                contentType(ContentType.Application.Json)
+                setBody("""{"url": "$url"}""")
+            }
+            
+            if (response.status.isSuccess()) {
+                val result = response.body<Map<String, Any>>()
+                return result["job_id"] as? String
+            }
+        } catch (e: Exception) {
+            Log.e("Transcriber", "Failed to submit transcription", e)
+        }
+        return null
+    }
+    
+    private suspend fun pollForCompletion(jobId: String): String? {
+        var attempts = 0
+        val maxAttempts = 60 // 3 minutes with 3-second intervals
+        
+        while (attempts < maxAttempts) {
+            try {
+                val response = httpClient.get("$baseUrl/transcribe/$jobId")
+                val result = response.body<Map<String, Any>>()
+                val status = result["status"] as? String
+                
+                when (status) {
+                    "COMPLETE" -> {
+                        // Get full transcript
+                        val transcriptResponse = httpClient.get("$baseUrl/transcript/$jobId")
+                        val transcript = transcriptResponse.body<Map<String, Any>>()
+                        return transcript["text"] as? String
+                    }
+                    "FAILED" -> {
+                        Log.e("Transcriber", "Transcription failed: ${result["message"]}")
+                        return null
+                    }
+                    else -> {
+                        // Still processing, wait and retry
+                        delay(3000) // 3 seconds
+                        attempts++
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("Transcriber", "Failed to check status", e)
+                delay(3000)
+                attempts++
+            }
+        }
+        
+        Log.e("Transcriber", "Transcription timed out")
+        return null
+    }
+}
+```
+
+### Error Handling
+
+The API returns structured error responses:
+
+```json
+{
+  "status": "FAILED",
+  "job_id": "job-id-here",
+  "code": "extraction_error",
+  "message": "Failed to extract audio from the video. This may be due to TikTok's content protection or network issues.",
+  "raw_error": "yt-dlp failed with exit code 1"
+}
+```
+
+Common error codes:
+- `invalid_url`: Not a valid TikTok URL
+- `extraction_error`: Failed to download/extract audio
+- `transcription_error`: Whisper transcription failed
+- `media_too_long`: Audio exceeds maximum duration
+- `service_busy`: Rate limit exceeded (includes `Retry-After` header)
+
+### Dev endpoints
+
+- `POST /jobs/repair`: repair stuck leases; returns count repaired
+- `GET /jobs`: queue summary + recent failed and stuck lists
+- `DELETE /jobs/failed`: clear all failed jobs
+- `DELETE /jobs/all`: clear all jobs (dev only)
+- `GET /jobs/all`: returns counts and a tip to use DELETE
+- `GET|POST /jobs/clear`: alias to clear all jobs
+
+### Static file mounts (dev)
+
+- `/files/audio` → `.local_storage/transcripts/audio`
+- `/files/transcripts` → `.local_storage/transcripts/transcripts`
+
+### Caching
+
+- After a successful run, artifacts are written:
+  - `.local_storage/transcripts/audio/{content_hash}.wav`
+  - `.local_storage/transcripts/transcripts/{content_hash}.json` (includes `source_url`, `content_hash`, `created_at`, `model`, `text`)
+  - `.local_storage/transcripts/keys/{url_key}.txt` mapping normalized TikTok URL → `content_hash`
+- On server startup, alias files are rebuilt from existing transcripts to enable instant cache hits after restarts.
+
+Client guidance: poll every 2–3s with exponential backoff (cap 30s), overall timeout 2–5 minutes depending on audio length and cold starts.
+
+### Error model (stable, client-mappable)
+
+Codes returned in error responses (as `code` and human `message`):
+- invalid_url: Provided URL is not a TikTok URL
+- service_busy: Global RPM limit exceeded; includes `Retry-After` header
+- media_too_long: Audio exceeds `MAX_AUDIO_SECONDS`
+- extraction_error: yt-dlp failed to extract audio
+- transcription_error: Whisper transcription failed
+- unexpected_error: Unhandled error, retry later
+
+## Notes
+
+- Designed for Windows 11 local dev and Hugging Face CPU Basic. Whisper runs on CPU; tiny model loaded once at startup.
+- Logging is JSON and always includes `job_id` and `component` to trace workflows end-to-end.
+- This is a lean monolith: modular folders, single deployable.
+>>>>>>> b5b28564 (CI deploy - 2025-10-02 21:20:45)
 
 ## License
 
