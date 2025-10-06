@@ -16,14 +16,11 @@ from .media import yt_dlp_m4a, to_wav_normalized
 from .transcription import transcribe_wav
 
 # Simple filesystem cache to avoid regenerating recent transcripts
-CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", os.path.join(os.getcwd(), "transcripts_cache"))
+CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", "/data/transcripts_cache")
 CACHE_TTL_SEC = int(os.environ.get("TRANSCRIPT_CACHE_TTL_SEC", "86400"))  # 24h default
 
 def _safe_mkdir(path: str) -> None:
-    try:
-        os.makedirs(path, exist_ok=True)
-    except Exception:
-        pass
+    os.makedirs(path, exist_ok=True)
 
 def _cache_key_for_url(expanded_url: str) -> str:
     # Prefer video_id when present; fallback to sha256 of canonical url
@@ -69,11 +66,21 @@ def _write_cache(expanded_url: str, payload: dict) -> None:
 
 
 logger = UILogHandler("tttranscribe")
+try:
+    from .build_info import GIT_SHA as _STAMPED_SHA, BUILD_TIME as _STAMPED_TIME
+except Exception:
+    _STAMPED_SHA, _STAMPED_TIME = None, None
+
 def _git_sha() -> str:
+    if _STAMPED_SHA:
+        return _STAMPED_SHA
+    env_sha = os.getenv("GIT_REV")
+    if env_sha:
+        return env_sha
     try:
         return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip()
     except Exception:
-        return os.getenv("GIT_REV", "unknown")
+        return "unknown"
 
 GIT_REV = _git_sha()
 
@@ -320,12 +327,12 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "build": {"git_sha": GIT_REV},
+            "build": {"git_sha": GIT_REV, "time": _STAMPED_TIME or "unknown"},
         }
 
     @app.get("/version")
     async def version():
-        return {"git_sha": GIT_REV, "started_at": datetime.now(timezone.utc).isoformat()}
+        return {"git_sha": GIT_REV, "started_at": datetime.now(timezone.utc).isoformat(), "build_time": _STAMPED_TIME or "unknown"}
 
     @app.get("/queue/status")
     async def queue_status():
