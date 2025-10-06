@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: purple
 sdk: docker
 sdk_version: "1.0"
-app_file: Dockerfile
+app_file: app.py
 pinned: false
 ---
 
@@ -197,7 +197,7 @@ cd tiktok-transciber-mvp
 pip install -r requirements.txt
 
 # Run locally (single entrypoint)
-python main.py
+uvicorn app:app --host 0.0.0.0 --port 7860
 ```
 
 The application will be available at `http://localhost:7860`
@@ -211,7 +211,8 @@ The application is deployed to Hugging Face Spaces with the following environmen
 - `API_SECRET`: Shared HMAC secret
 - `API_KEYS_JSON`: JSON map of API keys to owners
 - `RATE_LIMIT_CAPACITY`: Token bucket capacity (default: 60)
-- `RATE_LIMIT_REFILL_PER_MIN`: Tokens per minute refill (default: 1)
+- `RATE_LIMIT_REFILL_PER_SEC`: Tokens per second refill (default: 1.0)
+- `TRANSCRIPT_CACHE_DIR`: Persistent cache directory (default: /data/transcripts_cache)
 - `GOOGLE_APPLICATION_CREDENTIALS`: Path to GCP service account key
 - `GCP_PROJECT_ID`: Google Cloud project ID
 - `GCP_LOG_NAME`: Cloud logging log name

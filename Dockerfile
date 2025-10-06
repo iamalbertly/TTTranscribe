@@ -6,7 +6,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
 # Copy requirements first for better caching
@@ -18,8 +17,10 @@ RUN pip install --no-cache-dir torch==2.2.2 --index-url https://download.pytorch
 # Install other Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
 COPY . .
+
+# Ensure persistent cache directory exists
+RUN mkdir -p /data/transcripts_cache && chmod -R 777 /data
 
 # Create clean, writable cache directories
 RUN mkdir -p /home/user/.cache/huggingface \
@@ -34,6 +35,7 @@ ENV HF_HOME=/home/user/.cache/huggingface
 ENV XDG_CACHE_HOME=/home/user/.cache
 ENV TRANSFORMERS_CACHE=/home/user/.cache/huggingface
 ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV TRANSCRIPT_CACHE_DIR=/data/transcripts_cache
 ENV HF_HUB_READ_ONLY_TOKEN=
 # Fix matplotlib permission issues
 ENV MPLCONFIGDIR=/tmp/matplotlib
@@ -42,5 +44,5 @@ ENV HOME=/tmp
 # Expose port
 EXPOSE 7860
 
-# Run the application directly
-CMD ["python", "main.py"]
+# Run the FastAPI app via Uvicorn
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]

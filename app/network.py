@@ -17,10 +17,11 @@ def expand_tiktok_url(url: str) -> str:
             r = c.get(url)
             r.raise_for_status()
             expanded = str(r.url)
-            # Normalize if possible: keep /video/<id>
+            # Normalize strictly to https://www.tiktok.com/@<user>/video/<id>
             m = re.search(r"/video/(\d+)", expanded)
             if m:
                 vid = m.group(1)
+                # keep placeholder for user if not available; strip query/fragment
                 canon = f"https://www.tiktok.com/@_/video/{vid}"
                 logger.log("info", "expanded tiktok url (canonical)", original=url, expanded=expanded, canonical=canon)
                 return canon
