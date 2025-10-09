@@ -1,12 +1,10 @@
 import os, json, time, tempfile, hashlib, uuid, subprocess, traceback
 from datetime import datetime, timezone
-from typing import Optional
 
 import gradio as gr
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 from .logging_utils import UILogHandler, GCP_LOGGER
 from .auth import API_SECRET, ALLOWED_API_KEYS, API_KEYS_OWNER_MAP, verify_signature_shared, verify_timestamp
@@ -16,55 +14,8 @@ from .media import yt_dlp_m4a, to_wav_normalized
 from .transcription import transcribe_wav
 from .jobs import JobsRegistry, mount_job_endpoints
 from .ui import build_gradio_ui
-
-# Simple filesystem cache to avoid regenerating recent transcripts
-CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", "/data/transcripts_cache")
-CACHE_TTL_SEC = int(os.environ.get("TRANSCRIPT_CACHE_TTL_SEC", "86400"))  # 24h default
-
-def _safe_mkdir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
-
-def _cache_key_for_url(expanded_url: str) -> str:
-    # Prefer video_id when present; fallback to sha256 of canonical url
-    vid = "unknown"
-    if "tiktok.com" in expanded_url and "/video/" in expanded_url:
-        try:
-            vid = expanded_url.split("/video/")[1].split("?")[0]
-        except Exception:
-            vid = "unknown"
-    if vid and vid != "unknown":
-        return f"video_{vid}.json"
-    return hashlib.sha256(expanded_url.encode("utf-8")).hexdigest() + ".json"
-
-def _read_cache(expanded_url: str) -> Optional[dict]:
-    _safe_mkdir(CACHE_DIR)
-    key = _cache_key_for_url(expanded_url)
-    fp = os.path.join(CACHE_DIR, key)
-    try:
-        if os.path.exists(fp):
-            age = time.time() - os.path.getmtime(fp)
-            if age <= CACHE_TTL_SEC:
-                with open(fp, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                logger.log("info", "cache_hit", cache_key=key, age_sec=int(age))
-                return data
-            else:
-                logger.log("info", "cache_stale", cache_key=key, age_sec=int(age))
-        return None
-    except Exception as e:
-        logger.log("warning", "cache_read_failed", error=str(e))
-        return None
-
-def _write_cache(expanded_url: str, payload: dict) -> None:
-    _safe_mkdir(CACHE_DIR)
-    key = _cache_key_for_url(expanded_url)
-    fp = os.path.join(CACHE_DIR, key)
-    try:
-        with open(fp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-        logger.log("info", "cache_write_ok", cache_key=key, size=len(json.dumps(payload)))
-    except Exception as e:
-        logger.log("warning", "cache_write_failed", error=str(e))
+from .cache import read_cache, write_cache
+from .types import TranscribeResponse
 
 
 logger = UILogHandler("tttranscribe")
@@ -88,24 +39,6 @@ GIT_REV = _git_sha()
 
 
 
-class TranscribeRequest(BaseModel):
-    url: str
-
-
-class TranscribeResponse(BaseModel):
-    request_id: str
-    status: str
-    lang: str
-    duration_sec: float
-    transcript: str
-    transcript_sha256: str
-    source: dict
-    billed_tokens: int
-    elapsed_ms: int
-    ts: str
-    job_id: Optional[str] = None
-
-
 def process_tiktok_url(url: str) -> TranscribeResponse:
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -114,7 +47,7 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
         expanded = expand_tiktok_url(url)
 
         # Check cache before heavy work
-        cached = _read_cache(expanded)
+        cached = read_cache(expanded, logger)
         if cached:
             # Return cached response while preserving a new request_id and elapsed timing
             elapsed_ms = int((time.time() - start_time) * 1000)
@@ -174,7 +107,7 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
         )
 
         # Persist to cache for future requests
-        _write_cache(
+        write_cache(
             expanded,
             {
                 "status": result.status,
@@ -184,6 +117,7 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
                 "transcript_sha256": result.transcript_sha256,
                 "source": result.source,
             },
+            logger,
         )
 
         return result
@@ -200,14 +134,6 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
 def create_app() -> FastAPI:
     app = FastAPI(title="TTTranscibe API", version="1.0.0")
     print(f"===== Application Startup (git {GIT_REV}) =====", flush=True)
-    # In-memory jobs ledger for simple observability
-    from threading import Lock
-    from collections import deque
-
-    JOBS = {}
-    JOBS_ORDER = deque(maxlen=500)
-    JOBS_LOCK = Lock()
-
     registry = JobsRegistry()
 
     app.add_middleware(
@@ -318,41 +244,6 @@ def create_app() -> FastAPI:
         return {"git_sha": GIT_REV, "started_at": datetime.now(timezone.utc).isoformat(), "build_time": _STAMPED_TIME or "unknown"}
 
     mount_job_endpoints(app, registry, logger)
-
-    def transcribe_url(url: str, progress=gr.Progress()):
-        try:
-            if not url or not url.strip():
-                return "Provide a TikTok URL", "No URL"
-            url = url.strip()
-            from .logging_utils import LOGS  # lazy to avoid circulars
-
-            LOGS.clear()
-            logger.log("info", "submit", url=url)
-
-            progress(0.05, desc="Expanding URL")
-            expanded = expand_tiktok_url(url)
-
-            with tempfile.TemporaryDirectory(dir="/tmp", prefix="tiktok_") as tmpd:
-                progress(0.15, desc="Fetching audio")
-                m4a = yt_dlp_m4a(expanded, tmpd)
-                logger.log("info", "stored locally", object=os.path.basename(m4a), path=m4a)
-
-                progress(0.40, desc="Converting to WAV")
-                wav = os.path.join(tmpd, "audio.wav")
-                to_wav_normalized(m4a, wav)
-
-                progress(0.70, desc="Transcribing")
-                text, _, _ = transcribe_wav(wav)
-
-            progress(1.0, desc="Done")
-            logger.log("info", "FINAL_TRANSCRIPT", transcript=text)
-            return text, "Done"
-        except subprocess.CalledProcessError as e:
-            logger.log("error", "subprocess failed", cmd=e.cmd, code=e.returncode, out=e.stdout)
-            return f"[Error] command failed: {e.returncode}\n{e.stdout}", "Error"
-        except Exception as e:
-            logger.log("error", "exception", error=str(e), tb=traceback.format_exc())
-            return f"[Exception] {e}", "Error"
 
     demo = build_gradio_ui()
     app = gr.mount_gradio_app(app, demo, path="/")

@@ -1,13 +1,15 @@
 ## 2025-10-03 — Modularization & Duplication Cleanup
 
 - Consolidated monolithic server into modules under `app/`:
-  - `app/api.py` → FastAPI/Gradio app factory (`create_app`), endpoint handlers
+  - `app/api.py` → FastAPI/Gradio app factory (`create_app`), endpoint handlers (kept <300 LOC)
   - `app/auth.py` → Auth config and HMAC/timestamp verification
   - `app/rate_limit.py` → Token bucket per API key
   - `app/network.py` → URL expansion via `httpx`
   - `app/media.py` → `ffmpeg`/`yt-dlp` helpers
   - `app/transcription.py` → `faster-whisper` load + `transcribe_wav`
   - `app/logging_utils.py` → JSON log + optional GCP mirror
+  - `app/cache.py` → Transcript cache read/write utilities (filesystem cache)
+  - `app/types.py` → Pydantic request/response models for API
 - Single entrypoint: `main.py` imports `create_app()`; removed duplicate `app.py`.
 - Kept files <300 LOC by separation of concerns; removed obsolete/duplicate modules.
 
@@ -17,6 +19,8 @@ Dependency map (SSoT)
 Routes
 - POST `/api/transcribe` (HMAC auth, rate-limited)
 - GET `/health`
+- GET `/version`
+- GET `/jobs`, GET `/jobs/failed`, POST `/jobs/repair`, GET `/queue/status`
 - Gradio UI mounted at `/`
 
 Config (env)
@@ -26,7 +30,7 @@ Notes
 - Avoided circular imports by isolating concerns.
 - Testing scripts consolidated: canonical is `scripts/test_e2e.py`; `scripts/test_local.ps1` wraps it for local runs. Legacy testers removed.
 
-Last validated: 2025-10-03 (post test script consolidation)
+Last validated: 2025-10-09 (post cache/types extraction)
 
 
 - **NEW PUBLIC API**: Implemented FastAPI-based public API with HMAC-SHA256 authentication and rate limiting.
