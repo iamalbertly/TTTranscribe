@@ -22,7 +22,6 @@ COPY . .
 # Create clean, writable cache directories
 RUN mkdir -p /home/user/.cache/huggingface \
     && chmod -R 777 /home/user/.cache
-    && chmod -R 777 /home/user/.cache
 
 # No build-time model pre-warming - let faster-whisper download at runtime
 
