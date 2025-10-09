@@ -41,5 +41,5 @@ ENV HOME=/tmp
 # Expose port
 EXPOSE 7860
 
-# Run the application directly
-CMD ["python", "main.py"]
+# Run the FastAPI app (with Gradio mounted) so REST endpoints are available
+CMD ["python", "app.py"]
