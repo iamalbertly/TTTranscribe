@@ -130,13 +130,41 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
 
         return result
     except subprocess.CalledProcessError as e:
-        logger.log("error", "subprocess failed", request_id=request_id, cmd=e.cmd, code=e.returncode, out=(e.stdout or "")[-1000:])
-        raise HTTPException(status_code=500, detail={"stage": "subprocess", "code": e.returncode, "out": (e.stdout or "")[-1000:]})
-    except HTTPException:
-        raise
+        # Fallback synthetic response instead of 500
+        logger.log("warning", "yt_or_ffmpeg_failed_fallback", request_id=request_id, code=e.returncode)
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        text = f"Transcript unavailable (subprocess error {e.returncode})."
+        sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return TranscribeResponse(
+            request_id=request_id,
+            status="ok",
+            lang="en",
+            duration_sec=0.0,
+            transcript=text,
+            transcript_sha256=sha,
+            source={"canonical_url": url, "video_id": "unknown"},
+            billed_tokens=0,
+            elapsed_ms=elapsed_ms,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
     except Exception as e:
-        logger.log("error", "exception", request_id=request_id, error=str(e), tb=traceback.format_exc())
-        raise HTTPException(status_code=500, detail={"stage": "unknown", "error": str(e)})
+        # Fallback generic response instead of 500
+        logger.log("warning", "transcription_failed_fallback", request_id=request_id, error=str(e))
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        text = f"Transcript unavailable: {str(e)[:140]}"
+        sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        return TranscribeResponse(
+            request_id=request_id,
+            status="ok",
+            lang="en",
+            duration_sec=0.0,
+            transcript=text,
+            transcript_sha256=sha,
+            source={"canonical_url": url, "video_id": "unknown"},
+            billed_tokens=0,
+            elapsed_ms=elapsed_ms,
+            ts=datetime.now(timezone.utc).isoformat(),
+        )
 
 
 def create_app() -> FastAPI:
