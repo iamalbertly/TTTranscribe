@@ -195,16 +195,9 @@ cd tiktok-transciber-mvp
 
 # Install dependencies
 pip install -r requirements.txt
-<<<<<<< HEAD
-
-# Run locally (single entrypoint)
+```
+# Run locally (FastAPI + Gradio)
 uvicorn app:app --host 0.0.0.0 --port 7860
-=======
-```
-4) Run the app:
-```
-python main.py
->>>>>>> b5b28564 (CI deploy - 2025-10-02 21:20:45)
 ```
 
 The application will be available at `http://localhost:7860`
@@ -253,11 +246,9 @@ docker run -p 7860:7860 tiktok-transcriber
 curl https://iamromeoly-tttranscibe.hf.space/health
 ```
 
-<<<<<<< HEAD
 ### API Test
 
 Use the provided examples above or run the test scripts in the `scripts/` directory.
-=======
 3) Install faster-whisper after Torch is in place
 ```
 pip install faster-whisper==1.0.3

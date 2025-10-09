@@ -1,13 +1,25 @@
 import os, sys, json, subprocess
 from .logging_utils import UILogHandler
+from typing import Optional
 
 
 logger = UILogHandler("tttranscribe")
 
 
-def run(cmd: list[str], cwd: str | None = None) -> subprocess.CompletedProcess:
-    logger.log("info", "exec", cmd=cmd, cwd=cwd or "")
-    return subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=True)
+def run(cmd: list[str], cwd: str | None = None, timeout_sec: Optional[int] = None) -> subprocess.CompletedProcess:
+    logger.log("info", "exec", cmd=cmd, cwd=cwd or "", timeout_sec=timeout_sec or 0)
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=True,
+            timeout=timeout_sec,
+        )
+    except subprocess.TimeoutExpired as te:
+        raise RuntimeError(f"command timed out after {timeout_sec}s: {' '.join(cmd)}\n{te.output or ''}")
 
 
 def ffprobe_duration(path: str) -> float:
@@ -28,7 +40,7 @@ def ffprobe_duration(path: str) -> float:
         return 0.0
 
 
-def yt_dlp_m4a(expanded_url: str, out_dir: str) -> str:
+def yt_dlp_m4a(expanded_url: str, out_dir: str, timeout_sec: int = 90) -> str:
     out_tmpl = os.path.join(out_dir, "%(id)s.%(ext)s")
     cmd = [
         sys.executable,
@@ -56,7 +68,7 @@ def yt_dlp_m4a(expanded_url: str, out_dir: str) -> str:
         expanded_url,
         "--print-json",
     ]
-    cp = run(cmd)
+    cp = run(cmd, timeout_sec=timeout_sec)
     meta: dict = {}
     for line in cp.stdout.splitlines():
         line = line.strip()
@@ -77,7 +89,7 @@ def yt_dlp_m4a(expanded_url: str, out_dir: str) -> str:
     return downloaded
 
 
-def to_wav_normalized(src_path: str, dst_path: str) -> str:
+def to_wav_normalized(src_path: str, dst_path: str, timeout_sec: int = 90) -> str:
     cmd = [
         "ffmpeg",
         "-y",
@@ -92,7 +104,7 @@ def to_wav_normalized(src_path: str, dst_path: str) -> str:
         "pcm_s16le",
         dst_path,
     ]
-    run(cmd)
+    run(cmd, timeout_sec=timeout_sec)
     size = os.path.getsize(dst_path)
     dur = ffprobe_duration(dst_path)
     logger.log("info", "transcode successful", wav=dst_path, wav_size=size, duration=dur)

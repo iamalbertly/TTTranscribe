@@ -5,6 +5,7 @@ import gradio as gr
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from .logging_utils import UILogHandler, GCP_LOGGER
 from .auth import API_SECRET, ALLOWED_API_KEYS, API_KEYS_OWNER_MAP, verify_signature_shared, verify_timestamp
@@ -143,6 +144,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.post("/api/transcribe", response_model=TranscribeResponse)
     async def transcribe(
@@ -255,6 +257,10 @@ def create_app() -> FastAPI:
     mount_job_endpoints(app, registry, logger)
 
     # Root landing route (kept simple, includes the word 'gradio' for tests)
+    @app.get("/robots.txt", response_class=HTMLResponse)
+    async def robots():
+        return "User-agent: *\nDisallow: /api/\n"
+
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return """
@@ -284,6 +290,8 @@ def create_app() -> FastAPI:
     code { background:#0b1220; border:1px solid #1a2535; padding:2px 6px; border-radius:6px; color:#cde3ff; }
   </style>
   <meta http-equiv=\"Permissions-Policy\" content=\"interest-cohort=()\" />
+  <meta http-equiv=\"X-Content-Type-Options\" content=\"nosniff\" />
+  <meta http-equiv=\"Referrer-Policy\" content=\"no-referrer\" />
 </head>
 <body>
   <div class=\"container\">
