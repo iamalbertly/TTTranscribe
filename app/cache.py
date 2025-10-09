@@ -6,12 +6,23 @@ from typing import Optional, Dict, Any
 
 
 # Filesystem cache configuration
-CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", "/data/transcripts_cache")
+CACHE_DIR = os.environ.get("TRANSCRIPT_CACHE_DIR", "/tmp/transcripts_cache")
 CACHE_TTL_SEC = int(os.environ.get("TRANSCRIPT_CACHE_TTL_SEC", "86400"))  # 24h default
 
 
 def _safe_mkdir(path: str) -> None:
-    os.makedirs(path, exist_ok=True)
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        # Fallback to /tmp if configured directory is not writable
+        fallback = "/tmp/transcripts_cache"
+        if path != fallback:
+            try:
+                os.makedirs(fallback, exist_ok=True)
+                global CACHE_DIR
+                CACHE_DIR = fallback
+            except Exception:
+                pass
 
 
 def cache_key_for_url(expanded_url: str) -> str:

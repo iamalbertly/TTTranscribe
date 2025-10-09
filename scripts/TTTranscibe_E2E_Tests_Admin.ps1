@@ -15,7 +15,10 @@ function TT_TestTranscriptIntegrity {
     $sig = TT_NewHMACSignature -Secret $ApiSecret -Method 'POST' -Path '/api/transcribe' -Body $body -Timestamp $ts
     $hdr = @{ 'Content-Type'='application/json'; 'X-API-Key'=$ApiKey; 'X-Timestamp'=$ts; 'X-Signature'=$sig }
     try {
+        TT_LogInfo ("Integrity POST headers: {0}" -f ($hdr | ConvertTo-Json -Compress))
+        TT_LogInfo ("Integrity POST body: {0}" -f $body)
         $resp = Invoke-WebRequest -Uri "$BaseUrl/api/transcribe" -Method POST -Headers $hdr -Body $body -ContentType 'application/json' -TimeoutSec $TimeoutSec
+        TT_LogInfo ("Integrity response: {0}" -f $resp.Content)
         if ($resp.StatusCode -ne 200) { TT_LogError "Integrity HTTP $($resp.StatusCode)"; return $false }
         $r = $resp.Content | ConvertFrom-Json
         if ([string]::IsNullOrWhiteSpace($r.transcript) -or [string]::IsNullOrWhiteSpace($r.transcript_sha256)) { TT_LogError 'Integrity: missing fields'; return $false }

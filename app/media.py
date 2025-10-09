@@ -65,6 +65,7 @@ def yt_dlp_m4a(expanded_url: str, out_dir: str, timeout_sec: int = 90) -> str:
         "--no-cache-dir",
         "-o", out_tmpl,
         expanded_url,
+        "--paths", f"home={out_dir}",
         "--print-json",
     ]
     # First attempt: prefer m4a

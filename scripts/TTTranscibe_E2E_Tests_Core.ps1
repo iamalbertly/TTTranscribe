@@ -49,14 +49,20 @@ function TT_TestAPIStructure {
 
 function TT_TestAPITranscription {
     param([string]$BaseUrl,[string]$ApiKey,[string]$ApiSecret,[string]$Url,[int]$TimeoutSec,[int]$MaxRetries)
-    TT_LogInfo "Testing API transcription..."; TT_LogInfo "  -> $Url"
+    TT_LogInfo "Testing API transcription..."; TT_LogInfo "  -> Target URL: $Url"; TT_LogInfo "  -> Endpoint: $BaseUrl/api/transcribe"
     for ($i=1; $i -le $MaxRetries; $i++) {
         try {
             $ts = TT_UnixMs
             $body = @{ url = $Url } | ConvertTo-Json
             $sig = TT_NewHMACSignature -Secret $ApiSecret -Method 'POST' -Path '/api/transcribe' -Body $body -Timestamp $ts
             $hdr = @{ 'Content-Type'='application/json'; 'X-API-Key'=$ApiKey; 'X-Timestamp'=$ts; 'X-Signature'=$sig }
+            TT_LogInfo ("  -> Headers: {0}" -f ($hdr | ConvertTo-Json -Compress))
+            TT_LogInfo ("  -> Body: {0}" -f $body)
+            $start = Get-Date
             $r = Invoke-WebRequest -Uri "$BaseUrl/api/transcribe" -Method POST -Headers $hdr -Body $body -ContentType 'application/json' -TimeoutSec $TimeoutSec
+            $elapsed = (Get-Date) - $start
+            TT_LogInfo ("  -> Status: {0}, Elapsed: {1} ms" -f $r.StatusCode, [int]$elapsed.TotalMilliseconds)
+            TT_LogInfo ("  -> Response: {0}" -f $r.Content)
             if ($r.StatusCode -eq 200) { TT_LogOk 'Transcription ok'; return $true }
             TT_LogWarn "HTTP $($r.StatusCode) on attempt $i"; Start-Sleep -Seconds 2
         } catch { TT_LogWarn "Attempt $i failed: $($_.Exception.Message)"; if ($i -lt $MaxRetries) { Start-Sleep -Seconds 2 } }
