@@ -42,7 +42,7 @@ def ffprobe_duration(path: str) -> float:
 
 def yt_dlp_m4a(expanded_url: str, out_dir: str, timeout_sec: int = 90) -> str:
     out_tmpl = os.path.join(out_dir, "%(id)s.%(ext)s")
-    cmd = [
+    base = [
         sys.executable,
         "-m",
         "yt_dlp",
@@ -51,6 +51,8 @@ def yt_dlp_m4a(expanded_url: str, out_dir: str, timeout_sec: int = 90) -> str:
         "--add-header",
         "Referer:https://www.tiktok.com/",
         "--no-check-certificates",
+        "--force-ipv4",
+        "--geo-bypass",
         "--socket-timeout",
         "30",
         "--retries",
@@ -61,14 +63,21 @@ def yt_dlp_m4a(expanded_url: str, out_dir: str, timeout_sec: int = 90) -> str:
         "--no-warnings",
         "--no-part",
         "--no-cache-dir",
-        "-f",
-        "m4a/bestaudio[ext=m4a]/bestaudio/best",
-        "-o",
-        out_tmpl,
+        "-o", out_tmpl,
         expanded_url,
         "--print-json",
     ]
-    cp = run(cmd, timeout_sec=timeout_sec)
+    # First attempt: prefer m4a
+    cmd1 = base[:]
+    cmd1[cmd1.index("-o")-1:cmd1.index("-o")-1] = ["-f", "m4a/bestaudio[ext=m4a]/bestaudio/best"]
+    try:
+        cp = run(cmd1, timeout_sec=timeout_sec)
+    except Exception as e1:
+        logger.log("warning", "yt_dlp_first_attempt_failed", error=str(e1))
+        # Second attempt: more permissive format
+        cmd2 = base[:]
+        cmd2[cmd2.index("-o")-1:cmd2.index("-o")-1] = ["-f", "bestaudio/best"]
+        cp = run(cmd2, timeout_sec=timeout_sec)
     meta: dict = {}
     for line in cp.stdout.splitlines():
         line = line.strip()
