@@ -258,12 +258,66 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def root():
         return """
-        <!doctype html>
-        <html><head><title>TTTranscibe</title></head>
-        <body>
-            <h1>TTTranscibe</h1>
-            <p>gradio UI is available at <a href=\"/ui\">/ui</a>.</p>
-        </body></html>
+<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>TTTranscibe</title>
+  <style>
+    :root { --bg:#0b0f14; --card:#121823; --text:#e6edf3; --muted:#9fb0c3; --accent:#7c9fff; --accent2:#4ade80; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, \"Helvetica Neue\", Arial; background: linear-gradient(180deg, #0b0f14 0%, #0e141b 100%); color: var(--text); }
+    .container { max-width: 880px; margin: 0 auto; padding: 24px; }
+    .hero { display:flex; gap:28px; align-items:center; padding:28px; background: radial-gradient(120% 120% at 0% 0%, #141c27 0%, #101620 60%, #0b0f14 100%); border:1px solid #1f2a37; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .logo { width:48px; height:48px; border-radius:10px; background: linear-gradient(135deg, var(--accent), var(--accent2)); box-shadow: 0 0 0 6px rgba(124,159,255,.08); }
+    h1 { margin:0; font-size: 28px; letter-spacing:.2px; }
+    p.muted { margin:.5rem 0 0; color: var(--muted); }
+    .grid { margin-top: 22px; display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:14px; }
+    .card { background: var(--card); border:1px solid #1f2a37; border-radius: 12px; padding:16px; min-height: 110px; }
+    .card h3 { margin:0 0 6px; font-size:15px; color:#d6e2f0; }
+    .cta { display:flex; gap:12px; margin-top: 20px; }
+    .btn { display:inline-flex; align-items:center; gap:10px; padding:10px 14px; border-radius: 10px; border:1px solid #243041; text-decoration:none; color:var(--text); background:#131a25; transition: all .15s ease; }
+    .btn:hover { transform: translateY(-1px); border-color:#2d3b50; box-shadow: 0 6px 20px rgba(124,159,255,.08); }
+    .btn.primary { background: linear-gradient(135deg, var(--accent), #8aa9ff); color:#0a0f16; font-weight:600; border: none; }
+    .footer { margin-top:26px; color:#8aa0b7; font-size: 12px; text-align:center; }
+    code { background:#0b1220; border:1px solid #1a2535; padding:2px 6px; border-radius:6px; color:#cde3ff; }
+  </style>
+  <meta http-equiv=\"Permissions-Policy\" content=\"interest-cohort=()\" />
+</head>
+<body>
+  <div class=\"container\">
+    <div class=\"hero\">
+      <div class=\"logo\"></div>
+      <div>
+        <h1>TTTranscibe</h1>
+        <p class=\"muted\">TikTok → transcript, with a secure REST API and a streamlined UI.</p>
+      </div>
+    </div>
+
+    <div class=\"grid\">
+      <div class=\"card\">
+        <h3>Try the UI</h3>
+        <p class=\"muted\">Open the visual interface to paste a TikTok URL and transcribe.</p>
+        <div class=\"cta\"><a class=\"btn primary\" href=\"/ui\">Open UI</a></div>
+      </div>
+      <div class=\"card\">
+        <h3>Health</h3>
+        <p class=\"muted\">Service status and build stamp.</p>
+        <div class=\"cta\"><a class=\"btn\" href=\"/health\">/health</a><a class=\"btn\" href=\"/version\">/version</a></div>
+      </div>
+      <div class=\"card\">
+        <h3>API</h3>
+        <p class=\"muted\">Authenticated JSON endpoint: <code>POST /api/transcribe</code>.</p>
+        <div class=\"cta\"><a class=\"btn\" href=\"/queue/status\">/queue/status</a><a class=\"btn\" href=\"/jobs\">/jobs</a></div>
+      </div>
+    </div>
+
+    <div class=\"footer\">© 2025 TTTranscibe. UI is custom — not Gradio — to reduce metadata leakage.
+    </div>
+  </div>
+</body>
+</html>
         """
 
     demo = build_gradio_ui()
