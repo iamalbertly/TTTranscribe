@@ -5,7 +5,7 @@ colorFrom: blue
 colorTo: purple
 sdk: docker
 sdk_version: "1.0"
-app_file: app.py
+app_file: app/api.py
 pinned: false
 ---
 
@@ -28,11 +28,21 @@ A FastAPI + Gradio hybrid application that transcribes TikTok videos to text usi
 - **Remote**: `https://iamromeoly-tttranscibe.hf.space`
 - **Local dev**: `http://localhost:7860`
 
-### Endpoint
+### Endpoints
 
-**POST** `/api/transcribe`
+- **POST** `/api/transcribe` - Main transcription endpoint
+- **GET** `/health` - Health check
+- **GET** `/version` - Version info
+- **GET** `/jobs` - Job summary
+- **GET** `/jobs/failed` - Failed jobs
+- **POST** `/jobs/repair` - Repair failed jobs
+- **GET** `/queue/status` - Queue status
+- **GET** `/` - Landing page
+- **GET** `/ui` - Gradio interface
 
-### Headers
+### Authentication
+
+**POST** `/api/transcribe` requires:
 
 - `Content-Type: application/json`
 - `X-API-Key: <your-api-key>`
@@ -195,9 +205,9 @@ cd tiktok-transciber-mvp
 
 # Install dependencies
 pip install -r requirements.txt
-```
+
 # Run locally (FastAPI + Gradio)
-uvicorn app:app --host 0.0.0.0 --port 7860
+uvicorn app.api:app --host 0.0.0.0 --port 7860
 ```
 
 The application will be available at `http://localhost:7860`
@@ -212,7 +222,7 @@ The application is deployed to Hugging Face Spaces with the following environmen
 - `API_KEYS_JSON`: JSON map of API keys to owners
 - `RATE_LIMIT_CAPACITY`: Token bucket capacity (default: 60)
 - `RATE_LIMIT_REFILL_PER_SEC`: Tokens per second refill (default: 1.0)
-- `TRANSCRIPT_CACHE_DIR`: Persistent cache directory (default: /data/transcripts_cache)
+- `TRANSCRIPT_CACHE_DIR`: Persistent cache directory (default: /tmp/transcripts_cache)
 - `GOOGLE_APPLICATION_CREDENTIALS`: Path to GCP service account key
 - `GCP_PROJECT_ID`: Google Cloud project ID
 - `GCP_LOG_NAME`: Cloud logging log name
@@ -229,14 +239,17 @@ docker run -p 7860:7860 tiktok-transcriber
 
 ## Architecture
 
-- **FastAPI**: REST API with authentication and rate limiting (see `app/api.py`)
-- **Gradio**: Web UI mounted on FastAPI root
+- **FastAPI**: REST API with authentication and rate limiting (`app/api.py`)
+- **Gradio**: Web UI mounted on FastAPI at `/ui` (`app/ui.py`)
 - **Auth**: HMAC + timestamp (`app/auth.py`)
 - **Rate limiting**: Token bucket (`app/rate_limit.py`)
 - **Networking**: URL expansion (`app/network.py`)
 - **Media**: `yt-dlp` + `ffmpeg` helpers (`app/media.py`)
 - **ASR**: `faster-whisper` (`app/transcription.py`)
 - **Logging**: JSON logs + optional GCP (`app/logging_utils.py`)
+- **Cache**: Filesystem transcript cache (`app/cache.py`)
+- **Types**: Pydantic models (`app/types.py`)
+- **Jobs**: Job registry and management (`app/jobs.py`)
 
 ## Testing
 
@@ -246,103 +259,32 @@ docker run -p 7860:7860 tiktok-transcriber
 curl https://iamromeoly-tttranscibe.hf.space/health
 ```
 
-### API Test
+### E2E Testing
 
-Use the provided examples above or run the test scripts in the `scripts/` directory.
-3) Install faster-whisper after Torch is in place
-```
-pip install faster-whisper==1.0.3
-```
+Use the modular E2E test suite:
 
-4) Start the app:
-```
-$env:WHISPER_MODEL='tiny'
-$env:WHISPER_CACHE_DIR="$PWD\whisper_models_cache"
-python main.py
-```
-
-5) Test the app by opening http://127.0.0.1:7860 in your browser and entering a TikTok URL
-
-Notes:
-- `WHISPER_CACHE_DIR` defaults to `whisper-cache/` if not set.
-- `/health` is fast and non-blocking; it does not wait for model downloads or network checks.
-
-## Deploy to Hugging Face Spaces (Docker)
-
-1) Create a new public Space with the Docker runtime.
-2) Push this repo to the Space (or connect via GitHub).
-3) In Space Settings → Secrets, set:
-   - SUPABASE_URL
-   - SUPABASE_ANON_KEY
-   - SUPABASE_SERVICE_ROLE_KEY
-   - SUPABASE_STORAGE_BUCKET
-   - Optionally ALLOW_TIKTOK_ADAPTER=false to disable TikTok fetcher
-   - Optionally ALLOW_UPLOAD_ADAPTER=true to enable file uploads
-4) The container serves on port 7860. Open the URL in your browser to use the Gradio interface.
-
-The app now uses a simple synchronous approach - no database or external services required.
-
-## Database Schema (No longer needed)
-
-The app now uses a simple synchronous approach without database dependencies.
-
-### Safe deploy using env token (no secrets in repo)
-
-- Preferred: set token in env and run the tracked deploy script:
-  - PowerShell: `$env:HUGGINGFACE_HUB_TOKEN='hf_...'`
-  - Then: `.\u0063scripts\deploy_remote.ps1`
-- Or use the ignored local wrapper that stores your default token locally:
-  - `.\u0073ripts\deploy_remote.local.ps1`
-
-The deploy script will:
-- Auto-commit dirty changes (if `-AutoCommit`) and stash remaining, rebase, and if conflicts occur it aborts rebase and retries with `--force-with-lease`.
-- Temporarily move only `scripts/*.local.ps1` files to avoid rebase overwriting and restore them afterward.
-- Print a clear error if push still fails.
-
-If the Space rejects pushes because history contains a token in `scripts/deploy_remote.ps1`, fix by pushing a clean branch with no secret history:
-
-Fastest path (new clean branch):
 ```powershell
-git checkout --orphan deploy-clean
-git add -A
-git commit -m "chore(deploy): clean branch without secrets"
-git push origin deploy-clean --force-with-lease
+# Run comprehensive E2E tests
+cd scripts
+.\test_e2e_remote_api.ps1
 ```
-Point the Space to `deploy-clean` or push to the Space remote from this branch.
 
-Alternative (keep branch name but purge history):
-```powershell
-git checkout --orphan main-clean
-git add -A
-git commit -m "chore(deploy): clean history"
-git branch -M main-clean main
-git push origin main --force-with-lease
-```
-After the remote branch no longer contains token-bearing commits, deploys will succeed using env-based token.
-
-## Simple Gradio Interface
-
-The app now uses a direct Gradio interface where users can:
-- Enter a TikTok URL
-- Click "Transcribe" 
-- See the transcript appear immediately
-- No API endpoints or polling required
-
-### Web Interface
-
-The app provides a simple web interface where users can:
-- Enter a TikTok URL in the text box
-- Click the "Transcribe" button
-- Watch progress updates: "Expanding URL" → "Fetching audio" → "Converting to WAV" → "Transcribing" → "Done"
-- See the full transcript appear in the text area
-- Copy the transcript text directly from the interface
+The test suite includes:
+- Health and version checks
+- API structure validation
+- Authentication and rate limiting
+- Transcription functionality
+- Cache behavior
+- Job management
+- Transcript integrity
 
 ## Notes
 
-- Designed for Windows 11 local dev and Hugging Face CPU Basic. Whisper runs on CPU; tiny model loaded once at startup.
-- Logging is JSON and always includes `job_id` and `component` to trace workflows end-to-end.
-- This is a lean monolith: modular folders, single deployable.
->>>>>>> b5b28564 (CI deploy - 2025-10-02 21:20:45)
+- Designed for Windows 11 local dev and Hugging Face CPU Basic
+- Whisper runs on CPU; tiny model loaded once at startup
+- Logging is JSON and always includes `request_id` to trace workflows end-to-end
+- This is a lean monolith: modular folders, single deployable
+- All files kept under 300 lines for maintainability
 
 ## License
 
