@@ -29,17 +29,17 @@ TT_LogInfo "TTTranscibe Remote API E2E Test"; TT_LogInfo "======================
 TT_LogInfo "Base URL: $($cfg.BaseUrl)"; TT_LogInfo "Test URL: $($cfg.TestUrl)"; TT_LogInfo "Timeout: $($cfg.TimeoutSeconds)"; TT_LogInfo "Retries: $($cfg.Retries)"
 
 $results = [ordered]@{}
-$results.Health           = (TT_TestHealth -BaseUrl $cfg.BaseUrl)
-$results.Version          = (TT_TestVersion -BaseUrl $cfg.BaseUrl)
+$results.Health           = (TT_TestHealth -BaseUrl $cfg.BaseUrl);        if (-not $results.Health) { TT_LogError 'Fail: Health'; exit 1 }
+$results.Version          = (TT_TestVersion -BaseUrl $cfg.BaseUrl);       if (-not $results.Version) { TT_LogError 'Fail: Version'; exit 1 }
 $results.GradioUI         = (TT_TestGradioUI -BaseUrl $cfg.BaseUrl)
-$results.APIStructure     = (TT_TestAPIStructure -BaseUrl $cfg.BaseUrl)
-$results.JobRepair        = (TT_TestJobRepair -BaseUrl $cfg.BaseUrl)
+$results.APIStructure     = (TT_TestAPIStructure -BaseUrl $cfg.BaseUrl);  if (-not $results.APIStructure) { TT_LogError 'Fail: APIStructure'; exit 1 }
+$results.JobRepair        = (TT_TestJobRepair -BaseUrl $cfg.BaseUrl);     if (-not $results.JobRepair) { TT_LogError 'Fail: JobRepair'; exit 1 }
 $results.APITranscription = (TT_TestAPITranscription -BaseUrl $cfg.BaseUrl -ApiKey $cfg.ApiKey -ApiSecret $cfg.ApiSecret -Url $cfg.TestUrl -TimeoutSec $cfg.TimeoutSeconds -MaxRetries $cfg.Retries)
-$results.CacheBehavior    = (TT_TestCacheBehavior -BaseUrl $cfg.BaseUrl -ApiKey $cfg.ApiKey -ApiSecret $cfg.ApiSecret -Url $cfg.TestUrl -TimeoutSec $cfg.TimeoutSeconds)
+$results.CacheBehavior    = (TT_TestCacheBehavior -BaseUrl $cfg.BaseUrl -ApiKey $cfg.ApiKey -ApiSecret $cfg.ApiSecret -Url $cfg.TestUrl -TimeoutSec $cfg.TimeoutSeconds); if (-not $results.CacheBehavior) { TT_LogError 'Fail: CacheBehavior'; exit 1 }
 $results.RateLimiting     = (TT_TestRateLimiting -BaseUrl $cfg.BaseUrl -ApiKey $cfg.ApiKey -ApiSecret $cfg.ApiSecret -Url $cfg.TestUrl)
-$results.JobsSummary      = (TT_TestJobsSummary -BaseUrl $cfg.BaseUrl)
-$results.FailedJobs       = (TT_TestFailedJobs -BaseUrl $cfg.BaseUrl)
-$results.QueueStatus      = (TT_TestQueueStatus -BaseUrl $cfg.BaseUrl)
+$results.JobsSummary      = (TT_TestJobsSummary -BaseUrl $cfg.BaseUrl);    if (-not $results.JobsSummary) { TT_LogError 'Fail: JobsSummary'; exit 1 }
+$results.FailedJobs       = (TT_TestFailedJobs -BaseUrl $cfg.BaseUrl);     if (-not $results.FailedJobs) { TT_LogError 'Fail: FailedJobs'; exit 1 }
+$results.QueueStatus      = (TT_TestQueueStatus -BaseUrl $cfg.BaseUrl);    if (-not $results.QueueStatus) { TT_LogError 'Fail: QueueStatus'; exit 1 }
 $results.Integrity        = (TT_TestTranscriptIntegrity -BaseUrl $cfg.BaseUrl -ApiKey $cfg.ApiKey -ApiSecret $cfg.ApiSecret -Url $cfg.TestUrl -TimeoutSec $cfg.TimeoutSeconds)
 
 $passed = @($results.GetEnumerator() | Where-Object { $_.Value } | ForEach-Object { $_.Key })

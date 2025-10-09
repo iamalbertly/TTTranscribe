@@ -243,6 +243,15 @@ def create_app() -> FastAPI:
     async def version():
         return {"git_sha": GIT_REV, "started_at": datetime.now(timezone.utc).isoformat(), "build_time": _STAMPED_TIME or "unknown"}
 
+    # Aliases for robustness (some proxies may strip root paths)
+    @app.get("/api/health")
+    async def health_alias():
+        return await health()  # type: ignore[misc]
+
+    @app.get("/api/version")
+    async def version_alias():
+        return await version()  # type: ignore[misc]
+
     mount_job_endpoints(app, registry, logger)
 
     demo = build_gradio_ui()
