@@ -41,5 +41,6 @@ ENV HOME=/tmp
 # Expose port
 EXPOSE 7860
 
-# Run the FastAPI app (with Gradio mounted) so REST endpoints are available
-CMD ["python", "app.py"]
+# Run the FastAPI app with uvicorn (Gradio mounted inside app)
+ENV PORT=7860
+CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
