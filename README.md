@@ -251,8 +251,6 @@ docker run -p 7860:7860 tiktok-transcriber
 - **Types**: Pydantic models (`app/types.py`)
 - **Jobs**: Job registry and management (`app/jobs.py`)
 
-## Testing
-
 ### Health Check
 
 ```bash
