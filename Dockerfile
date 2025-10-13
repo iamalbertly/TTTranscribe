@@ -20,15 +20,19 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install Node.js dependencies
-RUN npm ci --only=production
+# Install Node.js dependencies (including dev dependencies for build)
+RUN npm ci
 
 # Copy source code
 COPY src/ ./src/
 COPY tsconfig.json ./
+COPY start.sh ./
 
 # Build TypeScript
 RUN npm run build
+
+# Remove dev dependencies to reduce image size
+RUN npm prune --production
 
 # Create directories for temporary files
 RUN mkdir -p /tmp/ttt && chmod 777 /tmp/ttt
@@ -47,5 +51,8 @@ EXPOSE 8788
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8788/health || exit 1
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Start the server
-CMD ["node", "dist/index.js"]
+CMD ["./start.sh"]

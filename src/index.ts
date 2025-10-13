@@ -13,11 +13,11 @@ const ENGINE_SHARED_SECRET = process.env.ENGINE_SHARED_SECRET;
 // Setup global error handling
 setupGlobalErrorHandling();
 
-// Validate environment on startup
+// Validate environment on startup (non-fatal for Hugging Face)
 const envValidation = validateEnvironment();
 if (!envValidation.isValid) {
-  console.error('Environment validation failed:', envValidation.errors);
-  process.exit(1);
+  console.warn('⚠️  Environment validation warnings:', envValidation.errors);
+  console.warn('⚠️  Some features may not work properly without proper configuration');
 }
 
 // Simple shared-secret authentication middleware
@@ -25,11 +25,12 @@ app.use('*', async (c, next) => {
   const key = c.req.header('X-Engine-Auth');
   
   if (!ENGINE_SHARED_SECRET) {
-    console.error('ENGINE_SHARED_SECRET environment variable is required');
-    return c.json({ error: 'server configuration error' }, 500);
-  }
-  
-  if (key !== ENGINE_SHARED_SECRET) {
+    console.warn('⚠️  ENGINE_SHARED_SECRET not set, using default for development');
+    // Allow requests with default secret for Hugging Face Spaces
+    if (key !== 'super-long-random') {
+      return c.json({ error: 'authentication required' }, 401);
+    }
+  } else if (key !== ENGINE_SHARED_SECRET) {
     throw new AuthenticationError('Invalid authentication token');
   }
   
@@ -95,11 +96,30 @@ app.get('/status/:id', async (c) => {
  * Health check endpoint
  */
 app.get('/health', async (c) => {
-  return c.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    service: 'tttranscribe'
-  });
+  try {
+    // Check if required environment variables are present
+    const hasRequiredEnv = !!(process.env.ENGINE_SHARED_SECRET && process.env.HF_API_KEY);
+    
+    return c.json({ 
+      status: hasRequiredEnv ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      service: 'tttranscribe',
+      version: '1.0.0',
+      environment: {
+        hasAuthSecret: !!process.env.ENGINE_SHARED_SECRET,
+        hasHfApiKey: !!process.env.HF_API_KEY,
+        asrProvider: process.env.ASR_PROVIDER || 'hf',
+        port: process.env.PORT || '8788'
+      }
+    });
+  } catch (error) {
+    return c.json({ 
+      status: 'error', 
+      timestamp: new Date().toISOString(),
+      service: 'tttranscribe',
+      error: 'Health check failed'
+    }, 500);
+  }
 });
 
 /**
@@ -123,13 +143,18 @@ app.onError((err, c) => {
   return c.json({ error: 'internal server error' }, 500);
 });
 
-// Start server
+// Start server with proper error handling
 const port = parseInt(PORT);
 console.log(`Starting TTTranscribe server on port ${port}`);
 
-serve({
-  fetch: app.fetch,
-  port,
-});
+try {
+  serve({
+    fetch: app.fetch,
+    port,
+  });
 
-console.log(`TTTranscribe server running at http://localhost:${port}`);
+  console.log(`✅ TTTranscribe server running at http://localhost:${port}`);
+} catch (error) {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
+}
