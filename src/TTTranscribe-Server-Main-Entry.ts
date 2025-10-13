@@ -1,17 +1,12 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { startJob, getStatus } from './TTTranscribe-Queue-Job-Processing';
+import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 
 const app = new Hono();
 
-// Environment variables
-const PORT = process.env.PORT || '8788';
-const ENGINE_SHARED_SECRET = process.env.ENGINE_SHARED_SECRET;
-
-// Simple environment validation
-if (!process.env.ENGINE_SHARED_SECRET) {
-  console.warn('⚠️  ENGINE_SHARED_SECRET not set, using default for development');
-}
+// Initialize environment-aware configuration
+let config: TTTranscribeConfig;
 
 // Simple shared-secret authentication middleware (skip for health checks)
 app.use('*', async (c, next) => {
@@ -22,7 +17,7 @@ app.use('*', async (c, next) => {
   }
   
   const key = c.req.header('X-Engine-Auth');
-  const expectedKey = ENGINE_SHARED_SECRET || 'super-long-random';
+  const expectedKey = config.engineSharedSecret;
   
   if (key !== expectedKey) {
     return c.json({ error: 'unauthorized' }, 401);
@@ -94,21 +89,19 @@ app.get('/status/:id', async (c) => {
  * Health check endpoint
  */
 app.get('/health', async (c) => {
-  const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
-  const hasAuthSecret = !!process.env.ENGINE_SHARED_SECRET;
-  const hasHfApiKey = !!process.env.HF_API_KEY;
-  
   return c.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
     service: 'tttranscribe',
     version: '1.0.0',
-    platform: isHuggingFace ? 'huggingface-spaces' : 'local',
+    platform: config.isHuggingFace ? 'huggingface-spaces' : 'local',
+    baseUrl: config.baseUrl,
     environment: {
-      hasAuthSecret,
-      hasHfApiKey,
-      asrProvider: process.env.ASR_PROVIDER || 'hf',
-      port: process.env.PORT || '8788'
+      hasAuthSecret: !!config.engineSharedSecret,
+      hasHfApiKey: !!config.hfApiKey,
+      asrProvider: config.asrProvider,
+      port: config.port,
+      tmpDir: config.tmpDir
     }
   });
 });
@@ -120,11 +113,26 @@ app.get('/', async (c) => {
   return c.json({ 
     service: 'TTTranscribe',
     version: '1.0.0',
+    platform: config.isHuggingFace ? 'huggingface-spaces' : 'local',
+    baseUrl: config.baseUrl,
     endpoints: [
       'POST /transcribe',
       'GET /status/:id',
       'GET /health'
-    ]
+    ],
+    documentation: {
+      transcribe: {
+        method: 'POST',
+        url: `${config.baseUrl}/transcribe`,
+        headers: { 'X-Engine-Auth': 'your-secret-key', 'Content-Type': 'application/json' },
+        body: { url: 'https://www.tiktok.com/@user/video/123' }
+      },
+      status: {
+        method: 'GET',
+        url: `${config.baseUrl}/status/{request_id}`,
+        headers: { 'X-Engine-Auth': 'your-secret-key' }
+      }
+    }
   });
 });
 
@@ -134,27 +142,39 @@ app.onError((err, c) => {
   return c.json({ error: 'internal server error' }, 500);
 });
 
-// Start server with environment-adaptive configuration
-const port = parseInt(PORT);
-const isProduction = process.env.NODE_ENV === 'production';
-const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
+// Initialize configuration and start server
+async function startServer() {
+  try {
+    // Initialize environment-aware configuration
+    config = await initializeConfig();
+    
+    console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
+    
+    serve({
+      fetch: app.fetch,
+      port: config.port,
+    });
 
-console.log(`🎯 Starting TTTranscribe server on port ${port}...`);
-console.log(`Environment: ${isProduction ? 'production' : 'development'}`);
-console.log(`Platform: ${isHuggingFace ? 'Hugging Face Spaces' : 'local'}`);
-
-try {
-  serve({
-    fetch: app.fetch,
-    port,
-  });
-
-  if (isHuggingFace) {
-    console.log(`✅ TTTranscribe server running on Hugging Face Spaces`);
-  } else {
-    console.log(`✅ TTTranscribe server running at http://localhost:${port}`);
+    if (config.isHuggingFace) {
+      console.log(`✅ TTTranscribe server running on Hugging Face Spaces`);
+      console.log(`🔗 Access your space at: ${config.baseUrl}`);
+    } else {
+      console.log(`✅ TTTranscribe server running at ${config.baseUrl}`);
+    }
+    
+    console.log(`📋 Configuration:`);
+    console.log(`   Platform: ${config.isHuggingFace ? 'Hugging Face Spaces' : 'Local Development'}`);
+    console.log(`   Base URL: ${config.baseUrl}`);
+    console.log(`   Auth Secret: ${config.engineSharedSecret ? 'Set' : 'Using default'}`);
+    console.log(`   HF API Key: ${config.hfApiKey ? 'Set' : 'Not set'}`);
+    console.log(`   ASR Provider: ${config.asrProvider}`);
+    console.log(`   Temp Directory: ${config.tmpDir}`);
+    
+  } catch (error) {
+    console.error('❌ Failed to start server:', error);
+    process.exit(1);
   }
-} catch (error) {
-  console.error('❌ Failed to start server:', error);
-  process.exit(1);
 }
+
+// Start the server
+startServer();

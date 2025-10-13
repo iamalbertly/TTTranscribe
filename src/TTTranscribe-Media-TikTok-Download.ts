@@ -2,7 +2,8 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import fetch from 'node-fetch';
 
-const TMP_DIR = process.env.TMP_DIR || '/tmp';
+// Get TMP_DIR from environment with proper fallback
+const TMP_DIR = process.env.TMP_DIR || (process.env.HF_SPACE_ID ? '/tmp' : '/tmp/ttt');
 
 /**
  * TikTok media resolver
