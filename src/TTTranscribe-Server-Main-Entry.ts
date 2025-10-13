@@ -8,23 +8,7 @@ const app = new Hono();
 // Initialize environment-aware configuration
 let config: TTTranscribeConfig;
 
-// Simple shared-secret authentication middleware (skip for health checks)
-app.use('*', async (c, next) => {
-  // Skip authentication for health checks and root endpoint
-  if (c.req.path === '/health' || c.req.path === '/') {
-    await next();
-    return;
-  }
-  
-  const key = c.req.header('X-Engine-Auth');
-  const expectedKey = config.engineSharedSecret;
-  
-  if (key !== expectedKey) {
-    return c.json({ error: 'unauthorized' }, 401);
-  }
-  
-  await next();
-});
+// Authentication middleware will be set up after config is loaded
 
 /**
  * POST /transcribe
@@ -147,6 +131,24 @@ async function startServer() {
   try {
     // Initialize environment-aware configuration
     config = await initializeConfig();
+    
+    // Set up authentication middleware after config is loaded
+    app.use('*', async (c, next) => {
+      // Skip authentication for health checks and root endpoint
+      if (c.req.path === '/health' || c.req.path === '/') {
+        await next();
+        return;
+      }
+      
+      const key = c.req.header('X-Engine-Auth');
+      const expectedKey = config.engineSharedSecret;
+      
+      if (key !== expectedKey) {
+        return c.json({ error: 'unauthorized' }, 401);
+      }
+      
+      await next();
+    });
     
     console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
     
