@@ -6,10 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     python3 \
     python3-pip \
+    python3-venv \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp for TikTok audio download
-RUN pip3 install yt-dlp
+# Install yt-dlp for TikTok audio download using virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install yt-dlp
 
 WORKDIR /app
 

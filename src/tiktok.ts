@@ -62,8 +62,8 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     const { promisify } = require('util');
     const execAsync = promisify(exec);
     
-    // Use yt-dlp to download audio from TikTok
-    const command = `yt-dlp -x --audio-format wav --output "${outputPath}" "${url}"`;
+    // Use yt-dlp from virtual environment to download audio from TikTok
+    const command = `/opt/venv/bin/yt-dlp -x --audio-format wav --output "${outputPath}" "${url}"`;
     
     console.log(`Downloading audio from ${url}...`);
     const { stdout, stderr } = await execAsync(command);
