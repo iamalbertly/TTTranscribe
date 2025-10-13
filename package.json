@@ -1,0 +1,32 @@
+{
+  "name": "tttranscribe",
+  "version": "1.0.0",
+  "description": "TTTranscribe - TikTok transcription service",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "node test-api.js",
+    "test:start": "node start-test.js"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "@hono/node-server": "^1.8.0",
+    "node-fetch": "^2.7.0",
+    "form-data": "^4.0.0",
+    "yt-dlp-wrap": "^2.0.0",
+    "fs-extra": "^11.2.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node-fetch": "^2.6.9",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  },
+  "keywords": ["transcription", "tiktok", "asr"],
+  "author": "",
+  "license": "MIT"
+}
