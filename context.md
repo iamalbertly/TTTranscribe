@@ -69,7 +69,7 @@ Staging deployment context (Hugging Face Space)
 
 Last updated: 2025-09-21
 
-Project: tiktok-transcriber-mvp (lean monolith)
+Project: TTTranscribe (lean monolith)
 
 Dependency map (NEW API ARCHITECTURE):
 - fastapi → REST API with authentication and rate limiting
