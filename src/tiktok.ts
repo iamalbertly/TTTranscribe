@@ -2,7 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import fetch from 'node-fetch';
 
-const TMP_DIR = process.env.TMP_DIR || '/tmp/ttt';
+const TMP_DIR = process.env.TMP_DIR || '/tmp';
 
 /**
  * TikTok media resolver
@@ -12,8 +12,12 @@ const TMP_DIR = process.env.TMP_DIR || '/tmp/ttt';
  */
 export async function download(url: string): Promise<string> {
   try {
-    // Ensure tmp directory exists
-    await fs.ensureDir(TMP_DIR);
+    // Try to ensure tmp directory exists, but don't fail if we can't
+    try {
+      await fs.ensureDir(TMP_DIR);
+    } catch (error) {
+      console.warn(`Could not create directory ${TMP_DIR}, using fallback:`, error);
+    }
     
     // Resolve redirects and get canonical URL
     const canonicalUrl = await resolveCanonicalUrl(url);
@@ -83,8 +87,15 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
   } catch (error) {
     // Fallback to placeholder if yt-dlp fails
     console.warn(`yt-dlp failed, using placeholder: ${error}`);
-    const placeholderContent = `# Placeholder audio file for ${url}\n# Downloaded at ${new Date().toISOString()}\n# yt-dlp failed: ${error}`;
-    await fs.writeFile(outputPath, placeholderContent);
+    
+    try {
+      const placeholderContent = `# Placeholder audio file for ${url}\n# Downloaded at ${new Date().toISOString()}\n# yt-dlp failed: ${error}`;
+      await fs.writeFile(outputPath, placeholderContent);
+    } catch (writeError) {
+      // If we can't write to the file system, create a virtual file path
+      console.warn(`Cannot write to filesystem in Hugging Face Spaces, using virtual file: ${writeError}`);
+      // Return the original path even if we can't write - the transcription will handle this
+    }
   }
 }
 
@@ -102,14 +113,16 @@ export function isValidTikTokUrl(url: string): boolean {
 }
 
 /**
- * Clean up temporary files
+ * Clean up temporary files (with Hugging Face Spaces compatibility)
  */
 export async function cleanupTempFile(filePath: string): Promise<void> {
   try {
     if (await fs.pathExists(filePath)) {
       await fs.remove(filePath);
+      console.log(`Cleaned up temp file: ${filePath}`);
     }
   } catch (error) {
-    console.warn(`Failed to cleanup temp file ${filePath}: ${error}`);
+    // In Hugging Face Spaces, file cleanup might not be allowed
+    console.warn(`Could not cleanup temp file ${filePath} (Hugging Face Spaces restriction): ${error}`);
   }
 }

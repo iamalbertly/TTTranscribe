@@ -34,13 +34,13 @@ RUN npm run build
 # Remove dev dependencies to reduce image size
 RUN npm prune --production
 
-# Create directories for temporary files
-RUN mkdir -p /tmp/ttt && chmod 777 /tmp/ttt
+# Note: Hugging Face Spaces handles temporary file storage automatically
+# We'll use /tmp which is typically available and writable
 
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=8788
-ENV TMP_DIR=/tmp/ttt
+ENV TMP_DIR=/tmp
 ENV KEEP_TEXT_MAX=10000
 ENV ASR_PROVIDER=hf
 

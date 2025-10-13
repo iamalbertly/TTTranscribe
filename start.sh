@@ -16,13 +16,14 @@ if [ -z "$HF_API_KEY" ]; then
     exit 1
 fi
 
-# Create temp directory if it doesn't exist
-mkdir -p /tmp/ttt
-chmod 777 /tmp/ttt
+# Create temp directory in a location allowed by Hugging Face Spaces
+mkdir -p /tmp/ttt || echo "Warning: Could not create /tmp/ttt, using alternative location"
+# Try alternative locations that are typically writable in Hugging Face Spaces
+export TMP_DIR=${TMP_DIR:-/tmp}
 
 # Set default environment variables if not provided
 export PORT=${PORT:-8788}
-export TMP_DIR=${TMP_DIR:-/tmp/ttt}
+export TMP_DIR=${TMP_DIR:-/tmp}
 export KEEP_TEXT_MAX=${KEEP_TEXT_MAX:-10000}
 export ASR_PROVIDER=${ASR_PROVIDER:-hf}
 
