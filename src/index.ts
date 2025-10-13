@@ -1,13 +1,24 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { startJob, getStatus } from './queue';
-import { isValidTikTokUrl } from './tiktok';
+import { validateTranscribeRequest, validateRequestId, validateEnvironment } from './validation';
+import { ValidationError, AuthenticationError, setupGlobalErrorHandling } from './error-handler';
 
 const app = new Hono();
 
 // Environment variables
 const PORT = process.env.PORT || '8788';
 const ENGINE_SHARED_SECRET = process.env.ENGINE_SHARED_SECRET;
+
+// Setup global error handling
+setupGlobalErrorHandling();
+
+// Validate environment on startup
+const envValidation = validateEnvironment();
+if (!envValidation.isValid) {
+  console.error('Environment validation failed:', envValidation.errors);
+  process.exit(1);
+}
 
 // Simple shared-secret authentication middleware
 app.use('*', async (c, next) => {
@@ -19,7 +30,7 @@ app.use('*', async (c, next) => {
   }
   
   if (key !== ENGINE_SHARED_SECRET) {
-    return c.json({ error: 'unauthorized' }, 401);
+    throw new AuthenticationError('Invalid authentication token');
   }
   
   await next();
@@ -33,15 +44,7 @@ app.use('*', async (c, next) => {
 app.post('/transcribe', async (c) => {
   try {
     const body = await c.req.json();
-    const { url } = body;
-    
-    if (!url) {
-      return c.json({ error: 'missing url' }, 400);
-    }
-    
-    if (!isValidTikTokUrl(url)) {
-      return c.json({ error: 'invalid tiktok url' }, 400);
-    }
+    const { url } = validateTranscribeRequest(body);
     
     const requestId = await startJob(url);
     
@@ -51,6 +54,10 @@ app.post('/transcribe', async (c) => {
     });
     
   } catch (error) {
+    if (error instanceof ValidationError) {
+      return c.json({ error: error.message }, 400);
+    }
+    
     console.error('Error in /transcribe:', error);
     return c.json({ error: 'internal server error' }, 500);
   }
@@ -65,11 +72,12 @@ app.get('/status/:id', async (c) => {
   try {
     const id = c.req.param('id');
     
-    if (!id) {
-      return c.json({ error: 'missing request id' }, 400);
+    const idValidation = validateRequestId(id);
+    if (!idValidation.isValid) {
+      return c.json({ error: `Invalid request ID: ${idValidation.errors.join(', ')}` }, 400);
     }
     
-    const status = getStatus(id);
+    const status = getStatus(idValidation.sanitizedValue!);
     
     if (!status) {
       return c.json({ error: 'not_found' }, 404);

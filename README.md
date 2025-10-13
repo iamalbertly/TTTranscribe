@@ -1,6 +1,25 @@
+---
+title: TTTranscribe
+emoji: 🎧
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+license: apache-2.0
+short_description: Transcribe TikTok videos to text using AI
+app_port: 8788
+tags:
+  - transcription
+  - tiktok
+  - asr
+  - whisper
+  - audio
+  - ai
+---
+
 # TTTranscribe
 
-TTTranscribe is a TikTok transcription service that provides stable endpoints for processing TikTok videos and extracting text content.
+TTTranscribe is a TikTok transcription service that provides stable endpoints for processing TikTok videos and extracting text content using AI.
 
 ## Features
 
@@ -47,100 +66,53 @@ Get the current status of a transcription job.
 - `REQUEST_SUBMITTED` → `DOWNLOADING` → `TRANSCRIBING` → `SUMMARIZING` → `COMPLETED`
 - `FAILED` (if error occurs)
 
-## Setup
+## Usage
 
-1. **Install dependencies:**
+### Authentication
+All requests require the `X-Engine-Auth` header with the shared secret:
+
+```bash
+curl -H "X-Engine-Auth: your-secret-key" \
+  -d '{"url":"https://www.tiktok.com/@user/video/123"}' \
+  -H "content-type: application/json" \
+  https://your-space-url.hf.space/transcribe
+```
+
+### Example Workflow
+
+1. **Submit a job:**
    ```bash
-   npm install
+   curl -H "X-Engine-Auth: your-secret" \
+     -d '{"url":"https://www.tiktok.com/@garyvee/video/7308801293029248299"}' \
+     -H "content-type: application/json" \
+     https://your-space-url.hf.space/transcribe
    ```
 
-2. **Configure environment:**
+2. **Check status:**
    ```bash
-   cp env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Build and run:**
-   ```bash
-   npm run build
-   npm start
+   curl -H "X-Engine-Auth: your-secret" \
+     https://your-space-url.hf.space/status/<request_id>
    ```
 
 ## Environment Variables
 
-```env
-PORT=8788
-ENGINE_SHARED_SECRET=super-long-random
-ASR_PROVIDER=hf
-HF_API_KEY=your-huggingface-api-key-here
-TMP_DIR=/tmp/ttt
-KEEP_TEXT_MAX=10000
-```
+Configure the service using these environment variables:
 
-## Authentication
-
-All requests require the `X-Engine-Auth` header with the shared secret:
-
-```bash
-curl -H "X-Engine-Auth: super-long-random" \
-  -d '{"url":"https://www.tiktok.com/@user/video/123"}' \
-  -H "content-type: application/json" \
-  http://localhost:8788/transcribe
-```
-
-## Logging Format
-
-The service outputs structured logs in the following format:
-
-```
-ttt:phase req=<id> phase=<PHASE> pct=<n> note=<short-string>
-ttt:error req=<id> where=<component> msg=<error>
-ttt:accepted req=<id> url=<short-id>
-```
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Run in development mode
-npm run dev
-
-# Build for production
-npm run build
-
-# Run production build
-npm start
-```
-
-## Testing
-
-Test the endpoints with curl:
-
-```bash
-# Submit a transcription job
-curl -H "X-Engine-Auth: super-long-random" \
-  -d '{"url":"https://www.tiktok.com/@garyvee/video/7308801293029248299"}' \
-  -H "content-type: application/json" \
-  http://localhost:8788/transcribe
-
-# Check status (replace <request_id> with actual ID)
-curl -H "X-Engine-Auth: super-long-random" \
-  http://localhost:8788/status/<request_id>
-```
+- `ENGINE_SHARED_SECRET`: Authentication secret for API access
+- `HF_API_KEY`: Hugging Face API key for transcription
+- `ASR_PROVIDER`: ASR provider (default: "hf")
+- `TMP_DIR`: Temporary directory for audio files (default: "/tmp/ttt")
+- `KEEP_TEXT_MAX`: Maximum text length (default: 10000)
 
 ## Architecture
 
-```
-src/
-├── server.ts          # HTTP server (Hono)
-├── queue.ts           # Job queue + in-memory status tracking
-├── tiktok.ts          # TikTok media resolver
-├── transcribe.ts      # ASR transcription (Hugging Face)
-├── summarize.ts       # Optional summarization
-└── log.ts            # Unified logging
-```
+The service is built with:
+
+- **Node.js + TypeScript**: Modern JavaScript runtime
+- **Hono**: Fast, lightweight web framework
+- **yt-dlp**: TikTok audio extraction
+- **Hugging Face API**: Whisper transcription
+- **Docker**: Containerized deployment
 
 ## Status Flow
 
@@ -156,3 +128,23 @@ src/
 - Missing authentication returns 401
 - Server errors return 500
 - Failed jobs are marked as `FAILED` phase
+
+## Development
+
+```bash
+# Install dependencies
+npm install
+
+# Build TypeScript
+npm run build
+
+# Start server
+npm start
+
+# Run tests
+npm test
+```
+
+## License
+
+Apache 2.0

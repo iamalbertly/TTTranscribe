@@ -1,46 +1,47 @@
-FROM python:3.11-slim
+FROM node:18-slim
 
-# Install system dependencies (ffmpeg required for audio processing)
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install yt-dlp for TikTok audio download
+RUN pip3 install yt-dlp
 
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Copy package files
+COPY package*.json ./
 
-# Install PyTorch CPU version first
-RUN pip install --no-cache-dir torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu
+# Install Node.js dependencies
+RUN npm ci --only=production
 
-# Install other Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy source code
+COPY src/ ./src/
+COPY tsconfig.json ./
 
-COPY . .
+# Build TypeScript
+RUN npm run build
 
-# Create clean, writable cache directories
-RUN mkdir -p /home/user/.cache/huggingface \
-    && chmod -R 777 /home/user/.cache
-
-# No build-time model pre-warming - let faster-whisper download at runtime
+# Create directories for temporary files
+RUN mkdir -p /tmp/ttt && chmod 777 /tmp/ttt
 
 # Set environment variables
-ENV WHISPER_MODEL=tiny
-# Use clean, writable cache directories
-ENV HF_HOME=/home/user/.cache/huggingface
-ENV XDG_CACHE_HOME=/home/user/.cache
-ENV TRANSFORMERS_CACHE=/home/user/.cache/huggingface
-ENV HF_HUB_DISABLE_TELEMETRY=1
-ENV HF_HUB_READ_ONLY_TOKEN=
-ENV TRANSCRIPT_CACHE_DIR=/data/transcripts_cache
-# Fix matplotlib permission issues
-ENV MPLCONFIGDIR=/tmp/matplotlib
-ENV HOME=/tmp
+ENV NODE_ENV=production
+ENV PORT=8788
+ENV TMP_DIR=/tmp/ttt
+ENV KEEP_TEXT_MAX=10000
+ENV ASR_PROVIDER=hf
 
 # Expose port
-EXPOSE 7860
+EXPOSE 8788
 
-# Run the FastAPI app with uvicorn (Gradio mounted inside app)
-ENV PORT=7860
-CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8788/health || exit 1
+
+# Start the server
+CMD ["node", "dist/index.js"]

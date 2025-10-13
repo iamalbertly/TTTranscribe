@@ -2,6 +2,8 @@ import { download } from './tiktok';
 import { transcribe } from './transcribe';
 import { summarize } from './summarize';
 import { logPhase, logError, logAccepted } from './log';
+import { withRetry, withTimeout, TTTranscribeError, sanitizeError } from './error-handler';
+import { cleanupTempFile } from './tiktok';
 
 export type Status = {
   phase: string;
@@ -25,10 +27,12 @@ export async function startJob(url: string): Promise<string> {
   
   logAccepted(id, url);
   
-  // Fire-and-forget async processing
+  // Fire-and-forget async processing with comprehensive error handling
   (async () => {
+    let wavPath: string | null = null;
+    
     try {
-      // Phase 1: Downloading
+      // Phase 1: Downloading with retry
       logPhase(id, 'DOWNLOADING', 15, 'fetch');
       statuses.set(id, { 
         phase: 'DOWNLOADING', 
@@ -36,9 +40,12 @@ export async function startJob(url: string): Promise<string> {
         note: 'fetch' 
       });
       
-      const wavPath = await download(url);
+      wavPath = await withRetry(
+        () => withTimeout(download(url), 60000, 'Download timeout'),
+        { maxRetries: 2, baseDelay: 2000 }
+      );
       
-      // Phase 2: Transcribing
+      // Phase 2: Transcribing with retry
       logPhase(id, 'TRANSCRIBING', 35, 'asr');
       statuses.set(id, { 
         phase: 'TRANSCRIBING', 
@@ -46,7 +53,10 @@ export async function startJob(url: string): Promise<string> {
         note: 'asr' 
       });
       
-      const text = await transcribe(wavPath);
+      const text = await withRetry(
+        () => withTimeout(transcribe(wavPath!), 120000, 'Transcription timeout'),
+        { maxRetries: 2, baseDelay: 3000 }
+      );
       
       // Phase 3: Summarizing
       logPhase(id, 'SUMMARIZING', 75, 'summary');
@@ -56,7 +66,11 @@ export async function startJob(url: string): Promise<string> {
         note: 'summary' 
       });
       
-      const note = await summarize(text);
+      const note = await withTimeout(
+        summarize(text), 
+        30000, 
+        'Summarization timeout'
+      );
       
       // Phase 4: Completed
       logPhase(id, 'COMPLETED', 100, note);
@@ -68,12 +82,23 @@ export async function startJob(url: string): Promise<string> {
       });
       
     } catch (e: any) {
-      logError(id, 'job', e.message);
+      const errorMessage = sanitizeError(e);
+      logError(id, 'job', errorMessage);
+      
       statuses.set(id, { 
         phase: 'FAILED', 
         percent: 0, 
-        note: e.message 
+        note: errorMessage 
       });
+    } finally {
+      // Cleanup temporary files
+      if (wavPath) {
+        try {
+          await cleanupTempFile(wavPath);
+        } catch (cleanupError) {
+          console.warn(`Failed to cleanup temp file ${wavPath}:`, cleanupError);
+        }
+      }
     }
   })();
   
