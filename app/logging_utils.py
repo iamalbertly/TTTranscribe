@@ -33,8 +33,24 @@ try:
         try:
             from google.cloud import logging as gcp_logging  # type: ignore
 
-            _gcp_client = gcp_logging.Client(project=os.getenv("GCP_PROJECT_ID", "tttranscibe-project-64857"))
-            GCP_LOGGER = _gcp_client.logger(os.getenv("GCP_LOG_NAME", "tttranscibe"))
+            gcp_project_id = os.getenv("GCP_PROJECT_ID")
+            if not gcp_project_id:
+                print(
+                    json.dumps(
+                        {
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.gmtime()),
+                            "level": "WARNING",
+                            "logger": "tttranscribe",
+                            "msg": "GCP_PROJECT_ID not set, skipping GCP logging initialization",
+                        }
+                    ),
+                    file=sys.stdout,
+                    flush=True,
+                )
+                GCP_LOGGER = None
+            else:
+                _gcp_client = gcp_logging.Client(project=gcp_project_id)
+                GCP_LOGGER = _gcp_client.logger(os.getenv("GCP_LOG_NAME", "tttranscribe"))
         except Exception as _gcp_err:
             print(
                 json.dumps(

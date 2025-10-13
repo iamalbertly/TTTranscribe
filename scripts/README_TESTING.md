@@ -1,8 +1,8 @@
-# TTTranscibe API Testing Guide
+# TTTranscribe API Testing Guide
 
 ## Overview
 
-The TTTranscibe API has been successfully implemented with the following features:
+The TTTranscribe API has been successfully implemented with the following features:
 
 - **POST /api/transcribe** - Main transcription endpoint with HMAC-SHA256 authentication
 - **GET /health** - Health check endpoint

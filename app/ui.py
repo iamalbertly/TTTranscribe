@@ -43,7 +43,7 @@ def build_gradio_ui():
             logger.log("error", "exception", error=str(e))
             return f"[Exception] {e}", "Error"
 
-    with gr.Blocks(title="TTTranscibe") as demo:
+    with gr.Blocks(title="TTTranscribe") as demo:
         gr.Markdown("### TikTok → Transcript, with live server logs")
         url_in = gr.Textbox(label="TikTok URL", placeholder="https://vm.tiktok.com/...")
         with gr.Row():

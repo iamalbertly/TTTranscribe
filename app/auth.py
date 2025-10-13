@@ -4,10 +4,16 @@ from typing import Dict
 
 # Environment-driven configuration
 API_SECRET = os.getenv("API_SECRET", "")
+if not API_SECRET:
+    print("WARNING: API_SECRET environment variable not set. Authentication will fail.", flush=True)
+
 _keys_raw = os.getenv("API_KEYS_JSON", "{}")
 try:
     API_KEYS_OWNER_MAP: Dict[str, str] = json.loads(_keys_raw)
-except Exception:
+    if not API_KEYS_OWNER_MAP:
+        print("WARNING: API_KEYS_JSON is empty or invalid. No API keys configured.", flush=True)
+except Exception as e:
+    print(f"WARNING: Failed to parse API_KEYS_JSON: {e}. No API keys configured.", flush=True)
     API_KEYS_OWNER_MAP = {}
 
 ALLOWED_API_KEYS = set(API_KEYS_OWNER_MAP.keys())

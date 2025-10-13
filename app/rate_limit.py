@@ -1,4 +1,5 @@
 import os, time, threading
+from typing import Optional
 
 
 class TokenBucket:
@@ -21,15 +22,19 @@ class TokenBucket:
             return False
 
 
-_bucket = None
+_bucket: Optional[TokenBucket] = None
+_bucket_lock = threading.Lock()
 
 
-def get_rate_limiter():
+def get_rate_limiter() -> TokenBucket:
     global _bucket
     if _bucket is None:
-        capacity = int(os.getenv("RATE_LIMIT_CAPACITY", "60"))
-        refill   = float(os.getenv("RATE_LIMIT_REFILL_PER_SEC", "1.0"))
-        _bucket = TokenBucket(capacity, refill)
+        with _bucket_lock:
+            # Double-checked locking pattern
+            if _bucket is None:
+                capacity = int(os.getenv("RATE_LIMIT_CAPACITY", "60"))
+                refill   = float(os.getenv("RATE_LIMIT_REFILL_PER_SEC", "1.0"))
+                _bucket = TokenBucket(capacity, refill)
     return _bucket
 
 

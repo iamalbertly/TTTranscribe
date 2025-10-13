@@ -1,5 +1,5 @@
 ---
-title: TTTranscibe - TikTok Video Transcription API
+title: TTTranscribe - TikTok Video Transcription API
 emoji: 🎧
 colorFrom: blue
 colorTo: purple
@@ -9,7 +9,7 @@ app_file: app/api.py
 pinned: false
 ---
 
-# TTTranscibe - TikTok Video Transcription API
+# TTTranscribe - TikTok Video Transcription API
 
 A FastAPI + Gradio hybrid application that transcribes TikTok videos to text using faster-whisper.
 

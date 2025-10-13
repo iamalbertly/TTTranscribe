@@ -168,7 +168,7 @@ def process_tiktok_url(url: str) -> TranscribeResponse:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="TTTranscibe API", version="1.0.0")
+    app = FastAPI(title="TTTranscribe API", version="1.0.0")
     print(f"===== Application Startup (git {GIT_REV}) =====", flush=True)
     registry = JobsRegistry()
 
@@ -208,9 +208,15 @@ def create_app() -> FastAPI:
 
         try:
             payload = json.loads(raw_str)
-            url = payload["url"]
-        except Exception:
+            url = payload.get("url")
+            if not url or not isinstance(url, str):
+                raise HTTPException(status_code=400, detail="Missing or invalid URL in request body")
+        except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="Malformed JSON body")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid request body")
 
         # Global token bucket (per Space); for per-key buckets, shard by key in rate_limit module
         rate_limiter = get_rate_limiter()
@@ -226,6 +232,10 @@ def create_app() -> FastAPI:
         start_ms = int(time.time() * 1000)
         try:
             result = process_tiktok_url(url)
+        except (ValueError, RuntimeError) as ve:
+            # Handle validation errors from network module
+            registry.set_job(job_id, status="FAILED", error=str(ve))
+            raise HTTPException(status_code=400, detail=str(ve))
         except HTTPException as he:
             registry.set_job(job_id, status="FAILED", error=str(he.detail))
             raise
@@ -304,7 +314,7 @@ def create_app() -> FastAPI:
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>TTTranscibe</title>
+  <title>TTTranscribe</title>
   <style>
     :root { --bg:#0b0f14; --card:#121823; --text:#e6edf3; --muted:#9fb0c3; --accent:#7c9fff; --accent2:#4ade80; }
     * { box-sizing: border-box; }
@@ -333,7 +343,7 @@ def create_app() -> FastAPI:
     <div class=\"hero\">
       <div class=\"logo\"></div>
       <div>
-        <h1>TTTranscibe</h1>
+        <h1>TTTranscribe</h1>
         <p class=\"muted\">TikTok → transcript, with a secure REST API and a streamlined UI.</p>
       </div>
     </div>
@@ -356,7 +366,7 @@ def create_app() -> FastAPI:
       </div>
     </div>
 
-    <div class=\"footer\">© 2025 TTTranscibe. UI is custom. <!-- gradio -->
+    <div class=\"footer\">© 2025 TTTranscribe. UI is custom. <!-- gradio -->
     </div>
   </div>
 </body>

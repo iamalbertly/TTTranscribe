@@ -1,7 +1,7 @@
-# TTTranscibe_E2E_Tests_Core.ps1
+# TTTranscribe_E2E_Tests_Core.ps1
 # Core endpoint tests: /health, /, /api/transcribe
 
-. "$PSScriptRoot/TTTranscibe_E2E_Utils.ps1"
+. "$PSScriptRoot/TTTranscribe_E2E_Utils.ps1"
 
 function TT_TestHealth {
     param([string]$BaseUrl)

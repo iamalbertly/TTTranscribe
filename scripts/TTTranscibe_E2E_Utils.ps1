@@ -1,4 +1,4 @@
-# TTTranscibe_E2E_Utils.ps1
+# TTTranscribe_E2E_Utils.ps1
 # Shared utilities for E2E tests: logging, signing, helpers
 
 Set-StrictMode -Version Latest

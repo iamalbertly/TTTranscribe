@@ -1,4 +1,4 @@
-# TTTranscibe_E2E_Config.ps1
+# TTTranscribe_E2E_Config.ps1
 # Provides configuration and defaults for E2E tests.
 
 param(

@@ -1,7 +1,7 @@
-# TTTranscibe_E2E_Tests_Admin.ps1
+# TTTranscribe_E2E_Tests_Admin.ps1
 # Admin/aux endpoints: jobs, failed, repair, queue/status, integrity, cache, rate limit
 
-. "$PSScriptRoot/TTTranscibe_E2E_Utils.ps1"
+. "$PSScriptRoot/TTTranscribe_E2E_Utils.ps1"
 
 function TT_TestJobsSummary { param([string]$BaseUrl) try { $r = Invoke-RestMethod "$BaseUrl/jobs" -TimeoutSec 15; TT_LogOk 'Jobs summary ok'; return $true } catch { TT_LogError "Jobs summary failed: $($_.Exception.Message)"; return $false } }
 function TT_TestFailedJobs { param([string]$BaseUrl) try { $r = Invoke-RestMethod "$BaseUrl/jobs/failed" -TimeoutSec 15; TT_LogOk 'Jobs failed ok'; return $true } catch { TT_LogError "Jobs failed endpoint failed: $($_.Exception.Message)"; return $false } }

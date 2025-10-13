@@ -1,6 +1,6 @@
 param(
   [string]$Owner = "iamromeoly",
-  [string]$SpaceName = "TTTranscibe",
+  [string]$SpaceName = "TTTranscribe",
   [string]$Token = "",
   [string]$Branch = "main",
   [string]$RemoteName = "origin",

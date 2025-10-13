@@ -3,7 +3,7 @@
 .SYNOPSIS
     Thin wrapper for TTTranscibe E2E tests (modular), under 300 lines.
 .NOTES
-    Uses scripts with prefix TTTranscibe_E2E_*
+    Uses scripts with prefix TTTranscribe_E2E_*
 #>
 
 param(
@@ -18,14 +18,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-. "$PSScriptRoot/TTTranscibe_E2E_Config.ps1"
-. "$PSScriptRoot/TTTranscibe_E2E_Utils.ps1"
-. "$PSScriptRoot/TTTranscibe_E2E_Tests_Core.ps1"
-. "$PSScriptRoot/TTTranscibe_E2E_Tests_Admin.ps1"
+. "$PSScriptRoot/TTTranscribe_E2E_Config.ps1"
+. "$PSScriptRoot/TTTranscribe_E2E_Utils.ps1"
+. "$PSScriptRoot/TTTranscribe_E2E_Tests_Core.ps1"
+. "$PSScriptRoot/TTTranscribe_E2E_Tests_Admin.ps1"
 
 $cfg = Get-E2EConfig -BaseUrl $BaseUrl -ApiKey $ApiKey -ApiSecret $ApiSecret -TestUrl $TestUrl -TimeoutSeconds $TimeoutSeconds -Retries $Retries
 
-TT_LogInfo "TTTranscibe Remote API E2E Test"; TT_LogInfo "=================================="
+TT_LogInfo "TTTranscribe Remote API E2E Test"; TT_LogInfo "=================================="
 TT_LogInfo "Base URL: $($cfg.BaseUrl)"; TT_LogInfo "Test URL: $($cfg.TestUrl)"; TT_LogInfo "Timeout: $($cfg.TimeoutSeconds)"; TT_LogInfo "Retries: $($cfg.Retries)"
 
 $results = [ordered]@{}
