@@ -5,8 +5,8 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "start": "node dist/TTTranscribe-Server-Main-Entry.js",
+    "dev": "ts-node src/TTTranscribe-Server-Main-Entry.ts",
     "test": "node test-api.js",
     "test:start": "node start-test.js"
   },

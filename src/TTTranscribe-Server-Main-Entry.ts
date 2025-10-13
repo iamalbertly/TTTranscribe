@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
-import { startJob, getStatus } from './queue';
-import { isValidTikTokUrl } from './tiktok';
+import { serve } from '@hono/node-server';
+import { startJob, getStatus } from './TTTranscribe-Queue-Job-Processing';
 
 const app = new Hono();
 
@@ -8,16 +8,23 @@ const app = new Hono();
 const PORT = process.env.PORT || '8788';
 const ENGINE_SHARED_SECRET = process.env.ENGINE_SHARED_SECRET;
 
-// Simple shared-secret authentication middleware
+// Simple environment validation
+if (!process.env.ENGINE_SHARED_SECRET) {
+  console.warn('⚠️  ENGINE_SHARED_SECRET not set, using default for development');
+}
+
+// Simple shared-secret authentication middleware (skip for health checks)
 app.use('*', async (c, next) => {
-  const key = c.req.header('X-Engine-Auth');
-  
-  if (!ENGINE_SHARED_SECRET) {
-    console.error('ENGINE_SHARED_SECRET environment variable is required');
-    return c.json({ error: 'server configuration error' }, 500);
+  // Skip authentication for health checks and root endpoint
+  if (c.req.path === '/health' || c.req.path === '/') {
+    await next();
+    return;
   }
   
-  if (key !== ENGINE_SHARED_SECRET) {
+  const key = c.req.header('X-Engine-Auth');
+  const expectedKey = ENGINE_SHARED_SECRET || 'super-long-random';
+  
+  if (key !== expectedKey) {
     return c.json({ error: 'unauthorized' }, 401);
   }
   
@@ -34,11 +41,12 @@ app.post('/transcribe', async (c) => {
     const body = await c.req.json();
     const { url } = body;
     
-    if (!url) {
+    if (!url || typeof url !== 'string') {
       return c.json({ error: 'missing url' }, 400);
     }
     
-    if (!isValidTikTokUrl(url)) {
+    // Basic TikTok URL validation
+    if (!url.includes('tiktok.com') && !url.includes('vm.tiktok.com')) {
       return c.json({ error: 'invalid tiktok url' }, 400);
     }
     
@@ -86,10 +94,22 @@ app.get('/status/:id', async (c) => {
  * Health check endpoint
  */
 app.get('/health', async (c) => {
+  const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
+  const hasAuthSecret = !!process.env.ENGINE_SHARED_SECRET;
+  const hasHfApiKey = !!process.env.HF_API_KEY;
+  
   return c.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
-    service: 'tttranscribe'
+    service: 'tttranscribe',
+    version: '1.0.0',
+    platform: isHuggingFace ? 'huggingface-spaces' : 'local',
+    environment: {
+      hasAuthSecret,
+      hasHfApiKey,
+      asrProvider: process.env.ASR_PROVIDER || 'hf',
+      port: process.env.PORT || '8788'
+    }
   });
 });
 
@@ -114,18 +134,27 @@ app.onError((err, c) => {
   return c.json({ error: 'internal server error' }, 500);
 });
 
-// Start server
+// Start server with environment-adaptive configuration
 const port = parseInt(PORT);
-console.log(`Starting TTTranscribe server on port ${port}`);
+const isProduction = process.env.NODE_ENV === 'production';
+const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
 
-export default {
-  port,
-  fetch: app.fetch,
-};
+console.log(`🎯 Starting TTTranscribe server on port ${port}...`);
+console.log(`Environment: ${isProduction ? 'production' : 'development'}`);
+console.log(`Platform: ${isHuggingFace ? 'Hugging Face Spaces' : 'local'}`);
 
-// If running directly (not as module), start the server
-if (require.main === module) {
-  // For Node.js, we need to use a different approach
-  // This will be handled by the build process
-  console.log(`TTTranscribe server ready to run on port ${port}`);
+try {
+  serve({
+    fetch: app.fetch,
+    port,
+  });
+
+  if (isHuggingFace) {
+    console.log(`✅ TTTranscribe server running on Hugging Face Spaces`);
+  } else {
+    console.log(`✅ TTTranscribe server running at http://localhost:${port}`);
+  }
+} catch (error) {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
 }
