@@ -48,11 +48,9 @@ ENV ASR_PROVIDER=hf
 EXPOSE 8788
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  ARG HEALTH_URL
-  ENV HEALTH_URL=${HEALTH_URL}
-  # Default to container port if HEALTH_URL not provided
-  CMD curl -f ${HEALTH_URL:-http://0.0.0.0:8788/health} || exit 1
+# Use an environment variable that can be overridden at build/run time
+ENV HEALTHCHECK_URL=http://0.0.0.0:8788/health
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 CMD curl -f "$HEALTHCHECK_URL" || exit 1
 
 # Make startup script executable
 RUN chmod +x start.sh
