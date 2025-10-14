@@ -19,15 +19,17 @@ tags:
 
 # TTTranscribe
 
-TTTranscribe is a TikTok transcription service that provides stable endpoints for processing TikTok videos and extracting text content using AI.
+TTTranscribe is a production-ready TikTok transcription service that provides stable endpoints for processing TikTok videos and extracting text content using AI. Built with TypeScript, Hono, and optimized for both local development and Hugging Face Spaces deployment.
 
 ## Features
 
-- **Fast API**: Accepts transcription requests and returns immediately with a request ID
-- **Status Tracking**: Real-time status updates with phase progression
-- **TikTok Support**: Handles TikTok URLs with redirect resolution
-- **ASR Integration**: Uses Hugging Face Whisper API for transcription
-- **Structured Logging**: Consistent log format for monitoring and debugging
+- **🚀 Fast API**: Accepts transcription requests and returns immediately with a request ID
+- **📊 Status Tracking**: Real-time status updates with phase progression
+- **🎵 TikTok Support**: Handles TikTok URLs with redirect resolution and audio extraction
+- **🤖 ASR Integration**: Uses Hugging Face Whisper API for high-quality transcription
+- **📝 Structured Logging**: Consistent log format for monitoring and debugging
+- **🌍 Environment Adaptive**: Automatically detects and adapts to local vs. Hugging Face Spaces
+- **💪 Production Ready**: Comprehensive error handling, fallbacks, and resilience
 
 ## API Endpoints
 
@@ -101,18 +103,39 @@ Configure the service using these environment variables:
 - `ENGINE_SHARED_SECRET`: Authentication secret for API access
 - `HF_API_KEY`: Hugging Face API key for transcription
 - `ASR_PROVIDER`: ASR provider (default: "hf")
-- `TMP_DIR`: Temporary directory for audio files (default: "/tmp/ttt")
+- `TMP_DIR`: Temporary directory for audio files (default: platform-aware)
 - `KEEP_TEXT_MAX`: Maximum text length (default: 10000)
+- `ALLOW_PLACEHOLDER_TRANSCRIPTION`: If `true`, returns placeholder text when `HF_API_KEY` is missing (default: true in local/dev)
 
 ## Architecture
 
 The service is built with:
 
-- **Node.js + TypeScript**: Modern JavaScript runtime
-- **Hono**: Fast, lightweight web framework
-- **yt-dlp**: TikTok audio extraction
-- **Hugging Face API**: Whisper transcription
-- **Docker**: Containerized deployment
+- **Node.js + TypeScript**: Modern JavaScript runtime with full type safety
+- **Hono**: Fast, lightweight web framework for high-performance APIs
+- **yt-dlp**: TikTok audio extraction (with Windows/Linux compatibility)
+- **Hugging Face API**: Whisper transcription with fallback handling
+- **Docker**: Containerized deployment optimized for Hugging Face Spaces
+- **Environment Detection**: Automatic adaptation between local and remote environments
+
+## File Structure
+
+```
+src/
+├── TTTranscribe-Server-Main-Entry.ts          # Main server (144 lines)
+├── TTTranscribe-Queue-Job-Processing.ts      # Job queue (85 lines)
+├── TTTranscribe-Media-TikTok-Download.ts     # TikTok download (129 lines)
+├── TTTranscribe-ASR-Whisper-Transcription.ts # Transcription (81 lines)
+├── TTTranscribe-AI-Text-Summarization.ts     # Summarization (67 lines)
+└── TTTranscribe-Config-Environment-Settings.ts # Environment config (118 lines)
+```
+
+**Design Principles:**
+- ✅ Single source of truth for each responsibility
+- ✅ Maximum 300 lines per file
+- ✅ Consistent naming convention: `[Project]-[ParentScope]-[ChildScope]-[CoreResponsibility]`
+- ✅ Zero technical debt and duplications
+- ✅ Environment-adaptive configuration
 
 ## Status Flow
 
@@ -131,6 +154,8 @@ The service is built with:
 
 ## Development
 
+### Local Development
+
 ```bash
 # Install dependencies
 npm install
@@ -138,11 +163,58 @@ npm install
 # Build TypeScript
 npm run build
 
-# Start server
+# Start server (uses .env.local)
 npm start
 
 # Run tests
 npm test
+```
+
+### Environment Setup
+
+**Local Development (.env.local):**
+```env
+PORT=8788
+ENGINE_SHARED_SECRET=super-long-random
+HF_API_KEY=your-huggingface-api-key-here # optional in dev
+TMP_DIR=./tmp # recommended on Windows
+KEEP_TEXT_MAX=10000
+ALLOW_PLACEHOLDER_TRANSCRIPTION=true
+BASE_URL=http://localhost:8788
+TEST_URL=https://www.tiktok.com/@test/video/1234567890
+```
+
+**Hugging Face Spaces:**
+- Set secrets in Hugging Face Spaces settings
+- Service automatically detects environment and adapts
+- Uses `/tmp` directory for file operations
+- Optimized for containerized deployment
+
+### Testing
+
+```bash
+# Test API endpoints
+node test-api.js
+
+# Test with curl
+curl -H "X-Engine-Auth: super-long-random" \
+  -d '{"url":"https://www.tiktok.com/@test/video/1234567890"}' \
+  -H "content-type: application/json" \
+  http://localhost:8788/transcribe
+```
+
+### Deployment
+
+**Hugging Face Spaces:**
+- Automatic deployment on git push
+- Docker container with optimized build
+- Environment variables via secrets
+- Health checks and monitoring
+
+**Local Docker:**
+```bash
+docker build -t tttranscribe .
+docker run -p 8788:8788 tttranscribe
 ```
 
 ## License

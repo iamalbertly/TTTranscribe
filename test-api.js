@@ -5,10 +5,12 @@
  * Tests the /transcribe and /status endpoints
  */
 
+require('dotenv/config');
 const fetch = require('node-fetch');
 
-const BASE_URL = 'http://localhost:8788';
-const AUTH_HEADER = 'super-long-random'; // Default from env.example
+const BASE_URL = process.env.BASE_URL || (process.env.PORT ? `http://localhost:${process.env.PORT}` : 'http://localhost:8788');
+const AUTH_HEADER = process.env.ENGINE_SHARED_SECRET || 'super-long-random';
+const TEST_URL = process.env.TEST_URL || 'https://www.tiktok.com/@test/video/1234567890';
 
 async function testAPI() {
   console.log('🧪 Testing TTTranscribe API...\n');
@@ -29,7 +31,7 @@ async function testAPI() {
         'X-Engine-Auth': AUTH_HEADER
       },
       body: JSON.stringify({
-        url: 'https://www.tiktok.com/@test/video/1234567890'
+        url: TEST_URL
       })
     });
     

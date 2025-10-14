@@ -8,14 +8,18 @@
     "start": "node dist/TTTranscribe-Server-Main-Entry.js",
     "dev": "ts-node src/TTTranscribe-Server-Main-Entry.ts",
     "test": "node test-api.js",
-    "test:start": "node start-test.js"
+    "test:start": "node start-test.js",
+    "test:e2e": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-Test-Runner.ps1 -Scenario QuickTest",
+    "test:e2e:full": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-Test-Runner.ps1 -Scenario FullTest",
+    
+    "test:orchestrator": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-E2E-Test-Orchestrator.ps1"
   },
   "dependencies": {
     "hono": "^4.0.0",
     "@hono/node-server": "^1.8.0",
     "node-fetch": "^2.7.0",
     "form-data": "^4.0.0",
-    "yt-dlp-wrap": "^2.0.0",
+    
     "fs-extra": "^11.2.0",
     "dotenv": "^16.3.1"
   },

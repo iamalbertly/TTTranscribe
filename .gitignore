@@ -47,6 +47,7 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
+tmp/
 .local_storage/
 whisper-cache/
 whisper_models_cache/
@@ -59,6 +60,7 @@ htmlcov/
 scripts/*.local.ps1
 .env
 .env.*
+
 
 # Test files
 test_server.py

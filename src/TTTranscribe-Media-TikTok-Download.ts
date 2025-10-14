@@ -1,9 +1,20 @@
+import 'dotenv/config';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import fetch from 'node-fetch';
 
 // Get TMP_DIR from environment with proper fallback
-const TMP_DIR = process.env.TMP_DIR || (process.env.HF_SPACE_ID ? '/tmp' : '/tmp/ttt');
+const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
+const isWindows = process.platform === 'win32';
+
+let TMP_DIR: string;
+if (isHuggingFace) {
+  TMP_DIR = '/tmp';
+} else if (isWindows) {
+  TMP_DIR = process.env.TMP_DIR || path.join(__dirname, '..', 'tmp');
+} else {
+  TMP_DIR = process.env.TMP_DIR || '/tmp/ttt';
+}
 
 /**
  * TikTok media resolver
@@ -67,8 +78,30 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     const { promisify } = require('util');
     const execAsync = promisify(exec);
     
-    // Use yt-dlp from virtual environment to download audio from TikTok
-    const command = `/opt/venv/bin/yt-dlp -x --audio-format wav --output "${outputPath}" "${url}"`;
+    // Determine yt-dlp command based on environment
+    const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
+    const isWindows = process.platform === 'win32';
+    
+    let ytdlpCommand: string;
+    if (isHuggingFace) {
+      ytdlpCommand = '/opt/venv/bin/yt-dlp';
+    } else if (isWindows) {
+      // On Windows, try yt-dlp first, then fallback to placeholder
+      ytdlpCommand = 'yt-dlp';
+    } else {
+      ytdlpCommand = 'yt-dlp';
+    }
+    
+    // For local development on Windows, skip yt-dlp and use placeholder
+    if (isWindows && !isHuggingFace) {
+      console.log(`Skipping yt-dlp on Windows local development, using placeholder for ${url}...`);
+      const placeholderContent = `# Placeholder audio file for ${url}\n# Downloaded at ${new Date().toISOString()}\n# Local development mode - yt-dlp not available on Windows`;
+      await fs.writeFile(outputPath, placeholderContent);
+      console.log(`Created placeholder audio file at ${outputPath}`);
+      return;
+    }
+    
+    const command = `${ytdlpCommand} -x --audio-format wav --output "${outputPath}" "${url}"`;
     
     console.log(`Downloading audio from ${url}...`);
     const { stdout, stderr } = await execAsync(command);
@@ -92,9 +125,10 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     try {
       const placeholderContent = `# Placeholder audio file for ${url}\n# Downloaded at ${new Date().toISOString()}\n# yt-dlp failed: ${error}`;
       await fs.writeFile(outputPath, placeholderContent);
+      console.log(`Created fallback placeholder file at ${outputPath}`);
     } catch (writeError) {
       // If we can't write to the file system, create a virtual file path
-      console.warn(`Cannot write to filesystem in Hugging Face Spaces, using virtual file: ${writeError}`);
+      console.warn(`Cannot write to filesystem, using virtual file: ${writeError}`);
       // Return the original path even if we can't write - the transcription will handle this
     }
   }

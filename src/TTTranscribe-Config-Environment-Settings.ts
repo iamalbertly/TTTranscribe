@@ -96,12 +96,23 @@ export async function initializeConfig(): Promise<TTTranscribeConfig> {
   const isLocal = isLocalEnvironment();
   
   // Get configuration with environment-specific defaults
+  // Compute tmpDir cross-platform
+  const resolvedTmpDir = (() => {
+    if (process.env.TMP_DIR) return process.env.TMP_DIR;
+    if (isHuggingFace) return '/tmp';
+    // On Windows, prefer project local tmp directory to avoid permission issues
+    if (process.platform === 'win32') {
+      return path.join(process.cwd(), 'tmp');
+    }
+    return '/tmp/ttt';
+  })();
+
   const config: TTTranscribeConfig = {
     port: parseInt(process.env.PORT || '8788'),
     engineSharedSecret: process.env.ENGINE_SHARED_SECRET || 'super-long-random',
     hfApiKey: process.env.HF_API_KEY,
     asrProvider: process.env.ASR_PROVIDER || 'hf',
-    tmpDir: process.env.TMP_DIR || (isHuggingFace ? '/tmp' : '/tmp/ttt'),
+    tmpDir: resolvedTmpDir,
     keepTextMax: parseInt(process.env.KEEP_TEXT_MAX || '10000'),
     isHuggingFace,
     isLocal,
