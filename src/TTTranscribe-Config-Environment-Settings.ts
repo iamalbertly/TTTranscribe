@@ -72,17 +72,31 @@ async function loadLocalEnv(): Promise<void> {
  * Get the appropriate base URL for the environment
  */
 function getBaseUrl(): string {
-  if (isHuggingFaceSpaces()) {
-    // On Hugging Face Spaces, use the space URL
-    const spaceUrl = process.env.HF_SPACE_URL || 
-                    process.env.HUGGINGFACE_SPACE_URL ||
-                    `https://${process.env.HF_SPACE_ID || process.env.HUGGINGFACE_SPACE_ID}.hf.space`;
-    return spaceUrl;
-  } else {
-    // Local development
-    const port = process.env.PORT || '8788';
-    return `http://localhost:${port}`;
+  // Explicit override takes precedence everywhere
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL;
   }
+
+  if (isHuggingFaceSpaces()) {
+    // On Hugging Face Spaces, prefer provided URLs
+    if (process.env.HF_SPACE_URL) return process.env.HF_SPACE_URL;
+    if (process.env.HUGGINGFACE_SPACE_URL) return process.env.HUGGINGFACE_SPACE_URL as string;
+
+    // Derive from HF_SPACE_ID if present (e.g., iamromeoly/TTTranscibe -> iamromeoly-tttranscibe.hf.space)
+    const rawId = process.env.HF_SPACE_ID || process.env.HUGGINGFACE_SPACE_ID;
+    if (rawId) {
+      const slug = rawId.replace(/[\/_]+/g, '-').toLowerCase();
+      return `https://${slug}.hf.space`;
+    }
+
+    // Last resort: use container port (internal only)
+    const port = process.env.PORT || '8788';
+    return `http://0.0.0.0:${port}`;
+  }
+
+  // Local development
+  const port = process.env.PORT || '8788';
+  return `http://localhost:${port}`;
 }
 
 /**

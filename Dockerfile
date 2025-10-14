@@ -49,7 +49,10 @@ EXPOSE 8788
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8788/health || exit 1
+  ARG HEALTH_URL
+  ENV HEALTH_URL=${HEALTH_URL}
+  # Default to container port if HEALTH_URL not provided
+  CMD curl -f ${HEALTH_URL:-http://0.0.0.0:8788/health} || exit 1
 
 # Make startup script executable
 RUN chmod +x start.sh

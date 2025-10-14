@@ -210,6 +210,7 @@ curl -H "X-Engine-Auth: super-long-random" \
 - Docker container with optimized build
 - Environment variables via secrets
 - Health checks and monitoring
+- Base URL is auto-detected: set `HF_SPACE_URL` (recommended) or `HF_SPACE_ID` and we derive `https://{org}-{space}.hf.space`.
 
 **Local Docker:**
 ```bash
