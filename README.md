@@ -46,27 +46,50 @@ Submit a TikTok URL for transcription.
 **Response:**
 ```json
 {
-  "request_id": "uuid-here",
-  "status": "accepted"
+  "id": "uuid-here",
+  "status": "queued",
+  "submittedAt": "2024-10-15T03:30:00.000Z",
+  "estimatedProcessingTime": 300,
+  "url": "https://www.tiktok.com/@user/video/1234567890"
 }
 ```
 
-### GET /status/{request_id}
+### GET /status/{id}
 Get the current status of a transcription job.
 
 **Response:**
 ```json
 {
-  "phase": "TRANSCRIBING",
-  "percent": 35,
-  "note": "asr",
-  "text": "transcribed text here"
+  "id": "uuid-here",
+  "status": "completed",
+  "progress": 100,
+  "submittedAt": "2024-10-15T03:30:00.000Z",
+  "completedAt": "2024-10-15T03:33:45.000Z",
+  "currentStep": "completed",
+  "result": {
+    "transcription": "This is the full transcription text...",
+    "confidence": 0.95,
+    "language": "en",
+    "duration": 30.5,
+    "wordCount": 45,
+    "speakerCount": 1,
+    "audioQuality": "high",
+    "processingTime": 225
+  },
+  "metadata": {
+    "title": "TikTok Video Title",
+    "author": "username",
+    "description": "Video description",
+    "url": "https://www.tiktok.com/@user/video/1234567890"
+  }
 }
 ```
 
-**Status Phases:**
-- `REQUEST_SUBMITTED` → `DOWNLOADING` → `TRANSCRIBING` → `SUMMARIZING` → `COMPLETED`
-- `FAILED` (if error occurs)
+**Status Values:**
+- `queued` - Job accepted and waiting to be processed
+- `processing` - Job is currently being processed
+- `completed` - Job completed successfully
+- `failed` - Job failed with error
 
 ## Usage
 
@@ -74,7 +97,7 @@ Get the current status of a transcription job.
 All requests require the `X-Engine-Auth` header with the shared secret:
 
 ```bash
-curl -H "X-Engine-Auth: your-secret-key" \
+curl -H "X-Engine-Auth: hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU" \
   -d '{"url":"https://www.tiktok.com/@user/video/123"}' \
   -H "content-type: application/json" \
   https://your-space-url.hf.space/transcribe
@@ -92,20 +115,61 @@ curl -H "X-Engine-Auth: your-secret-key" \
 
 2. **Check status:**
    ```bash
-   curl -H "X-Engine-Auth: your-secret" \
-     https://your-space-url.hf.space/status/<request_id>
+   curl -H "X-Engine-Auth: hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU" \
+     https://your-space-url.hf.space/status/<job_id>
    ```
 
 ## Environment Variables
 
 Configure the service using these environment variables:
 
-- `ENGINE_SHARED_SECRET`: Authentication secret for API access
+- `ENGINE_SHARED_SECRET`: Authentication secret for API access (default: protocol-compliant value)
 - `HF_API_KEY`: Hugging Face API key for transcription
 - `ASR_PROVIDER`: ASR provider (default: "hf")
 - `TMP_DIR`: Temporary directory for audio files (default: platform-aware)
 - `KEEP_TEXT_MAX`: Maximum text length (default: 10000)
 - `ALLOW_PLACEHOLDER_TRANSCRIPTION`: If `true`, returns placeholder text when `HF_API_KEY` is missing (default: true in local/dev)
+
+## Caching
+
+TTTranscribe implements intelligent caching to improve performance and reduce processing costs:
+
+- **48-hour TTL**: Results are cached for 48 hours to avoid re-transcribing the same TikTok videos
+- **URL normalization**: Similar URLs (with query parameters) hit the same cache entry
+- **Automatic cleanup**: Expired cache entries are cleaned up every hour
+- **Cache statistics**: Monitor cache performance via `/health` endpoint
+
+### Cache Behavior
+
+- **Cache Hit**: Returns completed result immediately (status: `completed`)
+- **Cache Miss**: Processes normally through all phases
+- **Cache Stats**: Available in health endpoint response
+
+## Secret Management
+
+### Hugging Face Spaces Deployment
+
+Use the provided script to set secrets programmatically:
+
+```bash
+# Install huggingface-cli
+pip install huggingface-hub
+
+# Login to Hugging Face
+huggingface-cli login
+
+# Set secrets using PowerShell script
+.\scripts\setup-hf-secrets.ps1 -HfApiKey "your-hf-api-key" -EngineSecret "hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU"
+```
+
+### Manual Secret Setup
+
+Alternatively, set secrets via Hugging Face Spaces web interface:
+1. Go to your Space settings
+2. Navigate to "Variables and secrets"
+3. Add secrets:
+   - `HF_API_KEY`: Your Hugging Face API key
+   - `ENGINE_SHARED_SECRET`: `hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU`
 
 ## Architecture
 
@@ -193,11 +257,14 @@ TEST_URL=https://www.tiktok.com/@test/video/1234567890
 ### Testing
 
 ```bash
-# Test API endpoints
-node test-api.js
+# Test API endpoints and protocol compliance
+node test-contract.js
+
+# Test cache functionality
+node test-cache.js
 
 # Test with curl
-curl -H "X-Engine-Auth: super-long-random" \
+curl -H "X-Engine-Auth: hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU" \
   -d '{"url":"https://www.tiktok.com/@test/video/1234567890"}' \
   -H "content-type: application/json" \
   http://localhost:8788/transcribe

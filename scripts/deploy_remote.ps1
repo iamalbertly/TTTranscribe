@@ -5,7 +5,10 @@ param(
   [string]$Branch = "main",
   [string]$RemoteName = "origin",
   [switch]$AutoCommit = $true,
-  [string]$CommitMessage = "CI deploy - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+  [string]$CommitMessage = "CI deploy - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+  [string]$HfApiKey = "",
+  [string]$EngineSecret = "hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU",
+  [switch]$SkipSecrets = $false
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +28,29 @@ try { $null = git rev-parse --is-inside-work-tree 2>$null } catch { PrintError "
 
 Print "Starting non-interactive deployment to Hugging Face Space"
 Print "Owner: $Owner  Space: $SpaceName  Branch: $Branch"
+
+# Set secrets if provided and not skipped
+if (-not $SkipSecrets) {
+  Print "Setting up secrets before deployment..."
+  try {
+    $secretScript = Join-Path $PSScriptRoot "setup-hf-secrets.ps1"
+    if (Test-Path $secretScript) {
+      & $secretScript -Owner $Owner -SpaceName $SpaceName -Token $Token -HfApiKey $HfApiKey -EngineSecret $EngineSecret
+      if ($LASTEXITCODE -eq 0) {
+        Print "✅ Secrets configured successfully"
+      } else {
+        PrintWarn "Secret setup had issues, but continuing with deployment"
+      }
+    } else {
+      PrintWarn "Secret setup script not found, skipping secret configuration"
+    }
+  } catch {
+    PrintWarn "Error during secret setup: $_"
+    PrintWarn "Continuing with deployment..."
+  }
+} else {
+  Print "Skipping secret setup as requested"
+}
 
 # Auto-commit if needed
 $status = git status --porcelain

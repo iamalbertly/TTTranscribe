@@ -1,3 +1,44 @@
+## 2025-10-26 — Pluct Business Engine Protocol Integration
+
+- **Protocol Compliance**: Updated API to match Pluct Business Engine communication protocols
+  - POST /transcribe returns `{ id, status: "queued", submittedAt, estimatedProcessingTime, url }` (HTTP 202)
+  - GET /status/:id returns protocol-compliant format with `{ id, status, progress, result, metadata }`
+  - Status values: `queued`, `processing`, `completed`, `failed` (mapped from internal phases)
+  - Result object includes: transcription, confidence, language, duration, wordCount, speakerCount, audioQuality, processingTime
+  - Metadata object includes: title, author, description, url
+
+- **48-Hour Job Result Caching**: Implemented intelligent caching for performance
+  - Redis-style in-memory cache with 48-hour TTL
+  - URL normalization for cache key generation
+  - Automatic cleanup every hour
+  - Cache statistics in health endpoint (size, hitRate, hitCount, missCount)
+  - Immediate return for cache hits (status: completed)
+
+- **Enhanced Error Handling**: Protocol-compliant error responses
+  - 400: `invalid_url` with details
+  - 401: `unauthorized` with message
+  - 404: `job_not_found` with jobId
+  - 429: `rate_limited` with retryAfter
+  - 500: `processing_failed` with reason
+
+- **Secret Management**: Programmatic secret configuration
+  - Created `scripts/setup-hf-secrets.ps1` for huggingface-cli integration
+  - Updated `scripts/deploy_remote.ps1` with secret setup
+  - Default ENGINE_SHARED_SECRET: `hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU`
+  - Enhanced .gitignore to prevent secret commits
+
+- **Authentication & Rate Limiting**: Enhanced security
+  - X-Engine-Auth header validation with protocol-compliant error responses
+  - Token bucket rate limiter per IP/X-Forwarded-For
+  - Local development bypass with `ENABLE_AUTH_BYPASS` flag (default: false)
+  - Rate limit responses with proper error format
+
+- **Contract Tests**: Updated for protocol compliance
+  - `test-contract.js` validates new response formats
+  - `test-cache.js` tests cache functionality
+  - Tests protocol-compliant field names and status values
+  - Validates result object structure and metadata
+
 ## 2025-10-03 — Modularization & Duplication Cleanup
 
 - Consolidated monolithic server into modules under `app/`:

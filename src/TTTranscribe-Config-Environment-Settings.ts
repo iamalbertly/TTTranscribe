@@ -16,6 +16,9 @@ export interface TTTranscribeConfig {
   isHuggingFace: boolean;
   isLocal: boolean;
   baseUrl: string;
+  allowPlaceholderTranscription: boolean;
+  rateLimitCapacity: number;
+  rateLimitRefillPerMin: number;
 }
 
 /**
@@ -123,14 +126,17 @@ export async function initializeConfig(): Promise<TTTranscribeConfig> {
 
   const config: TTTranscribeConfig = {
     port: parseInt(process.env.PORT || '8788'),
-    engineSharedSecret: process.env.ENGINE_SHARED_SECRET || 'super-long-random',
+    engineSharedSecret: process.env.ENGINE_SHARED_SECRET || 'hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU',
     hfApiKey: process.env.HF_API_KEY,
     asrProvider: process.env.ASR_PROVIDER || 'hf',
     tmpDir: resolvedTmpDir,
     keepTextMax: parseInt(process.env.KEEP_TEXT_MAX || '10000'),
     isHuggingFace,
     isLocal,
-    baseUrl: getBaseUrl()
+    baseUrl: getBaseUrl(),
+    allowPlaceholderTranscription: (process.env.ALLOW_PLACEHOLDER_TRANSCRIPTION || 'true').toLowerCase() === 'true',
+    rateLimitCapacity: parseInt(process.env.RATE_LIMIT_CAPACITY || '10'),
+    rateLimitRefillPerMin: parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10')
   };
   
   // Log environment information

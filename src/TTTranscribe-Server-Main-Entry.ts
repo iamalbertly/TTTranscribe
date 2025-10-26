@@ -2,13 +2,139 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { startJob, getStatus } from './TTTranscribe-Queue-Job-Processing';
 import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
+import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
+
+// Rate limiting implementation
+class TokenBucket {
+  private tokens: number;
+  private lastRefill: number;
+  private readonly capacity: number;
+  private readonly refillRate: number; // tokens per minute
+
+  constructor(capacity: number, refillRate: number) {
+    this.capacity = capacity;
+    this.tokens = capacity;
+    this.lastRefill = Date.now();
+    this.refillRate = refillRate;
+  }
+
+  tryConsume(tokens: number = 1): boolean {
+    this.refill();
+    if (this.tokens >= tokens) {
+      this.tokens -= tokens;
+      return true;
+    }
+    return false;
+  }
+
+  private refill(): void {
+    const now = Date.now();
+    const timePassed = (now - this.lastRefill) / 1000 / 60; // minutes
+    const tokensToAdd = timePassed * this.refillRate;
+    
+    this.tokens = Math.min(this.capacity, this.tokens + tokensToAdd);
+    this.lastRefill = now;
+  }
+
+  getTokensRemaining(): number {
+    this.refill();
+    return this.tokens;
+  }
+
+  getTimeUntilRefill(): number {
+    this.refill();
+    if (this.tokens >= this.capacity) return 0;
+    return Math.ceil((this.capacity - this.tokens) / this.refillRate * 60); // seconds
+  }
+}
+
+// Rate limiters per IP
+const rateLimiters = new Map<string, TokenBucket>();
 
 const app = new Hono();
 
 // Initialize environment-aware configuration
 let config: TTTranscribeConfig;
 
-// Authentication middleware will be set up after config is loaded
+/**
+ * Get client IP address (considering X-Forwarded-For header)
+ */
+function getClientIP(c: any): string {
+  const forwardedFor = c.req.header('X-Forwarded-For');
+  if (forwardedFor) {
+    return forwardedFor.split(',')[0].trim();
+  }
+  return c.req.header('X-Real-IP') || 'unknown';
+}
+
+/**
+ * Authentication middleware
+ */
+async function authMiddleware(c: any, next: any) {
+  // Skip authentication for health checks and root endpoint
+  if (c.req.path === '/health' || c.req.path === '/') {
+    await next();
+    return;
+  }
+  
+  // Skip authentication in local development if explicitly enabled
+  const enableAuthBypass = (process.env.ENABLE_AUTH_BYPASS || 'false').toLowerCase() === 'true';
+  
+  console.log(`Auth check: isLocal=${config.isLocal}, enableAuthBypass=${enableAuthBypass}, path=${c.req.path}`);
+  
+  if (config.isLocal && enableAuthBypass) {
+    console.log(`Local development mode: bypassing authentication for ${getClientIP(c)}`);
+    await next();
+    return;
+  }
+  
+  const authHeader = c.req.header('X-Engine-Auth');
+  const expectedSecret = config.engineSharedSecret;
+  
+  if (!authHeader || authHeader !== expectedSecret) {
+    console.log(`Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
+    return c.json({
+      error: 'unauthorized',
+      message: 'Missing or invalid X-Engine-Auth header'
+    }, 401);
+  }
+  
+  await next();
+}
+
+/**
+ * Rate limiting middleware
+ */
+async function rateLimitMiddleware(c: any, next: any) {
+  // Skip rate limiting for health checks and root endpoint
+  if (c.req.path === '/health' || c.req.path === '/') {
+    await next();
+    return;
+  }
+  
+  const clientIP = getClientIP(c);
+  const capacity = parseInt(process.env.RATE_LIMIT_CAPACITY || '10');
+  const refillRate = parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10');
+  
+  // Get or create rate limiter for this IP
+  let limiter = rateLimiters.get(clientIP);
+  if (!limiter) {
+    limiter = new TokenBucket(capacity, refillRate);
+    rateLimiters.set(clientIP, limiter);
+  }
+  
+  if (!limiter.tryConsume()) {
+    const retryAfter = limiter.getTimeUntilRefill();
+    console.log(`Rate limit exceeded for ${clientIP}, retry after ${retryAfter} seconds`);
+    return c.json({
+      error: 'rate_limited',
+      message: 'Too many requests',
+      details: { retryAfter: retryAfter }
+    }, 429);
+  }
+  
+  await next();
+}
 
 /**
  * POST /transcribe
@@ -21,24 +147,45 @@ app.post('/transcribe', async (c) => {
     const { url } = body;
     
     if (!url || typeof url !== 'string') {
-      return c.json({ error: 'missing url' }, 400);
+      return c.json({
+        error: 'invalid_url',
+        message: 'URL must be a valid TikTok video URL',
+        details: {
+          providedUrl: url || 'undefined',
+          expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
+        }
+      }, 400);
     }
     
     // Basic TikTok URL validation
     if (!url.includes('tiktok.com') && !url.includes('vm.tiktok.com')) {
-      return c.json({ error: 'invalid tiktok url' }, 400);
+      return c.json({
+        error: 'invalid_url',
+        message: 'URL must be a valid TikTok video URL',
+        details: {
+          providedUrl: url,
+          expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
+        }
+      }, 400);
     }
     
     const requestId = await startJob(url);
     
     return c.json({ 
-      request_id: requestId, 
-      status: 'accepted' 
-    });
+      id: requestId, 
+      status: 'queued',
+      submittedAt: new Date().toISOString(),
+      estimatedProcessingTime: 300,
+      url: url
+    }, 202);
     
   } catch (error) {
     console.error('Error in /transcribe:', error);
-    return c.json({ error: 'internal server error' }, 500);
+    return c.json({
+      error: 'processing_failed',
+      message: 'Failed to start transcription job',
+      details: { reason: 'internal_error' }
+    }, 500);
   }
 });
 
@@ -52,20 +199,35 @@ app.get('/status/:id', async (c) => {
     const id = c.req.param('id');
     
     if (!id) {
-      return c.json({ error: 'missing request id' }, 400);
+      return c.json({
+        error: 'invalid_url',
+        message: 'Missing job ID parameter',
+        details: {
+          providedId: id || 'undefined',
+          expectedFormat: 'valid job ID'
+        }
+      }, 400);
     }
     
     const status = getStatus(id);
     
     if (!status) {
-      return c.json({ error: 'not_found' }, 404);
+      return c.json({
+        error: 'job_not_found',
+        message: 'Transcription job not found',
+        details: { jobId: id }
+      }, 404);
     }
     
     return c.json(status);
     
   } catch (error) {
     console.error('Error in /status:', error);
-    return c.json({ error: 'internal server error' }, 500);
+    return c.json({
+      error: 'processing_failed',
+      message: 'Failed to retrieve job status',
+      details: { reason: 'internal_error' }
+    }, 500);
   }
 });
 
@@ -73,13 +235,23 @@ app.get('/status/:id', async (c) => {
  * Health check endpoint
  */
 app.get('/health', async (c) => {
+  const cacheStats = jobResultCache.getStats();
+  
   return c.json({ 
-    status: 'ok', 
+    status: 'healthy',
+    version: '1.0.0',
+    uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     service: 'tttranscribe',
-    version: '1.0.0',
     platform: config.isHuggingFace ? 'huggingface-spaces' : 'local',
     baseUrl: config.baseUrl,
+    cache: {
+      size: cacheStats.size,
+      hitRate: cacheStats.hitRate,
+      hitCount: cacheStats.hitCount,
+      missCount: cacheStats.missCount,
+      oldestEntry: cacheStats.oldestEntry
+    },
     environment: {
       hasAuthSecret: !!config.engineSharedSecret,
       hasHfApiKey: !!config.hfApiKey,
@@ -132,23 +304,9 @@ async function startServer() {
     // Initialize environment-aware configuration
     config = await initializeConfig();
     
-    // Set up authentication middleware after config is loaded
-    app.use('*', async (c, next) => {
-      // Skip authentication for health checks and root endpoint
-      if (c.req.path === '/health' || c.req.path === '/') {
-        await next();
-        return;
-      }
-      
-      const key = c.req.header('X-Engine-Auth');
-      const expectedKey = config.engineSharedSecret;
-      
-      if (key !== expectedKey) {
-        return c.json({ error: 'unauthorized' }, 401);
-      }
-      
-      await next();
-    });
+    // Set up middleware
+    app.use('*', rateLimitMiddleware);
+    app.use('*', authMiddleware);
     
     console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
     
@@ -171,6 +329,13 @@ async function startServer() {
     console.log(`   HF API Key: ${config.hfApiKey ? 'Set' : 'Not set'}`);
     console.log(`   ASR Provider: ${config.asrProvider}`);
     console.log(`   Temp Directory: ${config.tmpDir}`);
+    
+    // Start cache cleanup interval (every hour)
+    setInterval(() => {
+      jobResultCache.cleanup();
+    }, 60 * 60 * 1000);
+    
+    console.log(`🔄 Cache cleanup scheduled every hour`);
     
   } catch (error) {
     console.error('❌ Failed to start server:', error);

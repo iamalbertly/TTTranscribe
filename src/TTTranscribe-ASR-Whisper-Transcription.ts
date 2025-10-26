@@ -32,7 +32,7 @@ export async function transcribe(wavPath: string): Promise<string> {
     const allowPlaceholder = (process.env.ALLOW_PLACEHOLDER_TRANSCRIPTION || 'true').toLowerCase() === 'true';
     if (!HF_API_KEY && allowPlaceholder) {
       console.warn('HF_API_KEY not set; returning placeholder transcription');
-      return `[Transcription placeholder for ${wavPath} - No HF_API_KEY provided]`;
+      return `[PLACEHOLDER TRANSCRIPTION] This is a placeholder transcription for development purposes. Set HF_API_KEY to enable real transcription.`;
     }
 
     const model = 'openai/whisper-large-v3';

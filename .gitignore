@@ -60,6 +60,11 @@ htmlcov/
 scripts/*.local.ps1
 .env
 .env.*
+.env.local
+*.local.ps1
+*secret*
+*token*
+*key*
 
 
 # Test files
