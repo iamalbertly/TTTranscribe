@@ -173,7 +173,7 @@ async function rateLimitMiddleware(c: any, next: any) {
  * Accepts a TikTok URL and starts transcription job
  * Returns: { request_id, status: "accepted" }
  */
-app.post('/transcribe', async (c) => {
+app.post('/transcribe', authMiddleware, async (c) => {
   try {
     let body;
     try {
@@ -240,7 +240,7 @@ app.post('/transcribe', async (c) => {
  * Returns job status and progress
  * Returns: { phase, percent, note, text? }
  */
-app.get('/status/:id', async (c) => {
+app.get('/status/:id', authMiddleware, async (c) => {
   try {
     const id = c.req.param('id');
     
@@ -353,9 +353,8 @@ async function startServer() {
     console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
     console.log(`🔐 Config loaded: isHuggingFace=${config.isHuggingFace}, isLocal=${config.isLocal}`);
     
-    // Set up middleware AFTER config is initialized
+    // Set up rate limiting middleware
     app.use('*', rateLimitMiddleware);
-    app.use('*', authMiddleware);
     
     console.log(`🔐 Middleware registered with config: isHuggingFace=${config.isHuggingFace}`);
     
