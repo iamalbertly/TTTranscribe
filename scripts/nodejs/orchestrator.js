@@ -10,7 +10,7 @@ const { execSync } = require('child_process');
 
 // Configuration
 const CONFIG = {
-  BASE_URL: process.env.BASE_URL || 'http://localhost:8788',
+  BASE_URL: process.env.BASE_URL || 'https://iamromeoly-tttranscibe.hf.space',
   AUTH_SECRET: process.env.ENGINE_SHARED_SECRET || 'hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU',
   TEST_URL: process.env.TEST_URL || 'https://www.tiktok.com/@test/video/1234567890',
   TIMEOUT: parseInt(process.env.TEST_TIMEOUT || '30000'),

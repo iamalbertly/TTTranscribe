@@ -77,12 +77,13 @@ async function authMiddleware(c: any, next: any) {
     return;
   }
   
-  // Skip authentication in local development if explicitly enabled
+  // Only allow auth bypass in local development with explicit flag
   const enableAuthBypass = (process.env.ENABLE_AUTH_BYPASS || 'false').toLowerCase() === 'true';
   
   console.log(`Auth check: isLocal=${config.isLocal}, enableAuthBypass=${enableAuthBypass}, path=${c.req.path}`);
   
-  if (config.isLocal && enableAuthBypass) {
+  // Only bypass auth in local development, never in production
+  if (config.isLocal && enableAuthBypass && !config.isHuggingFace) {
     console.log(`Local development mode: bypassing authentication for ${getClientIP(c)}`);
     await next();
     return;
@@ -95,7 +96,11 @@ async function authMiddleware(c: any, next: any) {
     console.log(`Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
     return c.json({
       error: 'unauthorized',
-      message: 'Missing or invalid X-Engine-Auth header'
+      message: 'Missing or invalid X-Engine-Auth header',
+      details: {
+        provided: authHeader ? 'present' : 'missing',
+        expected: 'X-Engine-Auth header with valid secret'
+      }
     }, 401);
   }
   
@@ -143,7 +148,21 @@ async function rateLimitMiddleware(c: any, next: any) {
  */
 app.post('/transcribe', async (c) => {
   try {
-    const body = await c.req.json();
+    let body;
+    try {
+      body = await c.req.json();
+    } catch (jsonError) {
+      console.error('JSON parsing error:', jsonError);
+      return c.json({
+        error: 'invalid_request',
+        message: 'Invalid JSON in request body',
+        details: {
+          reason: 'malformed_json',
+          expectedFormat: '{"url": "https://www.tiktok.com/@username/video/1234567890"}'
+        }
+      }, 400);
+    }
+    
     const { url } = body;
     
     if (!url || typeof url !== 'string') {
