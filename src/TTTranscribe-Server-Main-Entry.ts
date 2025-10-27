@@ -86,6 +86,7 @@ async function authMiddleware(c: any, next: any) {
     const expectedSecret = config.engineSharedSecret;
     
     console.log(`🔐 Production auth check: header=${authHeader ? 'present' : 'missing'}, expected=${expectedSecret ? 'present' : 'missing'}`);
+    console.log(`🔐 Secret comparison: provided='${authHeader}', expected='${expectedSecret}', match=${authHeader === expectedSecret}`);
     
     if (!authHeader || authHeader !== expectedSecret) {
       console.log(`❌ Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
