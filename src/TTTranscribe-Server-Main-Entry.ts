@@ -281,7 +281,7 @@ app.get('/', async (c) => {
         method: 'POST',
         url: `${config.baseUrl}/transcribe`,
         headers: { 'X-Engine-Auth': 'your-secret-key', 'Content-Type': 'application/json' },
-        body: { url: 'https://www.tiktok.com/@user/video/123' }
+        body: { url: 'https://vm.tiktok.com/ZMADQVF4e/' }
       },
       status: {
         method: 'GET',
