@@ -350,11 +350,14 @@ async function startServer() {
     // Initialize environment-aware configuration
     config = await initializeConfig();
     
-    // Set up middleware
+    console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
+    console.log(`🔐 Config loaded: isHuggingFace=${config.isHuggingFace}, isLocal=${config.isLocal}`);
+    
+    // Set up middleware AFTER config is initialized
     app.use('*', rateLimitMiddleware);
     app.use('*', authMiddleware);
     
-    console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
+    console.log(`🔐 Middleware registered with config: isHuggingFace=${config.isHuggingFace}`);
     
     serve({
       fetch: app.fetch,
