@@ -1,0 +1,31 @@
+{
+  "name": "tttranscribe-test-suite",
+  "version": "1.0.0",
+  "description": "Comprehensive E2E test suite for TTTranscribe service",
+  "main": "orchestrator.js",
+  "scripts": {
+    "test": "node orchestrator.js",
+    "test:all": "node orchestrator.js",
+    "test:core": "node -e \"const Test = require('./journeys/CoreAPIJourney'); const test = new Test(require('./config')); test.run().then(r => process.exit(r.success ? 0 : 1));\"",
+    "test:errors": "node -e \"const Test = require('./journeys/ErrorHandlingJourney'); const test = new Test(require('./config')); test.run().then(r => process.exit(r.success ? 0 : 1));\"",
+    "test:cache": "node -e \"const Test = require('./journeys/CacheBehaviorJourney'); const test = new Test(require('./config')); test.run().then(r => process.exit(r.success ? 0 : 1));\"",
+    "test:protocol": "node -e \"const Test = require('./journeys/ProtocolComplianceJourney'); const test = new Test(require('./config')); test.run().then(r => process.exit(r.success ? 0 : 1));\"",
+    "test:performance": "node -e \"const Test = require('./journeys/PerformanceJourney'); const test = new Test(require('./config')); test.run().then(r => process.exit(r.success ? 0 : 1));\"",
+    "lint": "echo 'No linting configured'",
+    "help": "echo 'Available commands: test, test:all, test:core, test:errors, test:cache, test:protocol, test:performance'"
+  },
+  "keywords": [
+    "testing",
+    "e2e",
+    "tttranscribe",
+    "api",
+    "transcription"
+  ],
+  "author": "TTTranscribe Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
