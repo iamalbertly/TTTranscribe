@@ -77,6 +77,27 @@ async function authMiddleware(c: any, next: any) {
     return;
   }
   
+  // Never bypass authentication in production (Hugging Face Spaces)
+  if (config.isHuggingFace) {
+    const authHeader = c.req.header('X-Engine-Auth');
+    const expectedSecret = config.engineSharedSecret;
+    
+    if (!authHeader || authHeader !== expectedSecret) {
+      console.log(`Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
+      return c.json({
+        error: 'unauthorized',
+        message: 'Missing or invalid X-Engine-Auth header',
+        details: {
+          provided: authHeader ? 'present' : 'missing',
+          expected: 'X-Engine-Auth header with valid secret'
+        }
+      }, 401);
+    }
+    
+    await next();
+    return;
+  }
+  
   // Only allow auth bypass in local development with explicit flag
   const enableAuthBypass = (process.env.ENABLE_AUTH_BYPASS || 'false').toLowerCase() === 'true';
   
