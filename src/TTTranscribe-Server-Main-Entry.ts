@@ -77,13 +77,18 @@ async function authMiddleware(c: any, next: any) {
     return;
   }
   
+  // Debug logging
+  console.log(`🔐 Auth middleware: path=${c.req.path}, isHuggingFace=${config?.isHuggingFace}, isLocal=${config?.isLocal}`);
+  
   // Never bypass authentication in production (Hugging Face Spaces)
-  if (config.isHuggingFace) {
+  if (config?.isHuggingFace) {
     const authHeader = c.req.header('X-Engine-Auth');
     const expectedSecret = config.engineSharedSecret;
     
+    console.log(`🔐 Production auth check: header=${authHeader ? 'present' : 'missing'}, expected=${expectedSecret ? 'present' : 'missing'}`);
+    
     if (!authHeader || authHeader !== expectedSecret) {
-      console.log(`Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
+      console.log(`❌ Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
       return c.json({
         error: 'unauthorized',
         message: 'Missing or invalid X-Engine-Auth header',
@@ -94,6 +99,7 @@ async function authMiddleware(c: any, next: any) {
       }, 401);
     }
     
+    console.log(`✅ Authentication successful for ${getClientIP(c)}`);
     await next();
     return;
   }
@@ -101,17 +107,17 @@ async function authMiddleware(c: any, next: any) {
   // Only allow auth bypass in local development with explicit flag
   const enableAuthBypass = (process.env.ENABLE_AUTH_BYPASS || 'false').toLowerCase() === 'true';
   
-  console.log(`Auth check: isLocal=${config.isLocal}, enableAuthBypass=${enableAuthBypass}, path=${c.req.path}`);
+  console.log(`Auth check: isLocal=${config?.isLocal}, enableAuthBypass=${enableAuthBypass}, path=${c.req.path}`);
   
   // Only bypass auth in local development, never in production
-  if (config.isLocal && enableAuthBypass && !config.isHuggingFace) {
+  if (config?.isLocal && enableAuthBypass && !config?.isHuggingFace) {
     console.log(`Local development mode: bypassing authentication for ${getClientIP(c)}`);
     await next();
     return;
   }
   
   const authHeader = c.req.header('X-Engine-Auth');
-  const expectedSecret = config.engineSharedSecret;
+  const expectedSecret = config?.engineSharedSecret;
   
   if (!authHeader || authHeader !== expectedSecret) {
     console.log(`Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
