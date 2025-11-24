@@ -11,7 +11,7 @@ const { execSync } = require('child_process');
 // Configuration
 const CONFIG = {
   BASE_URL: process.env.BASE_URL || 'https://iamromeoly-tttranscibe.hf.space',
-  AUTH_SECRET: process.env.ENGINE_SHARED_SECRET || 'hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU',
+  AUTH_SECRET: process.env.ENGINE_SHARED_SECRET,
   TEST_URL: process.env.TEST_URL || 'https://www.tiktok.com/@test/video/1234567890',
   TIMEOUT: parseInt(process.env.TEST_TIMEOUT || '30000'),
   MAX_RETRIES: parseInt(process.env.MAX_RETRIES || '3'),
@@ -30,7 +30,7 @@ class Logger {
     if (this.levels[level] >= this.levels[this.level]) {
       const timestamp = new Date().toISOString();
       const prefix = `[${timestamp}] [${level.toUpperCase()}]`;
-      
+
       if (data) {
         console.log(`${prefix} ${message}`, data);
       } else {
@@ -84,7 +84,7 @@ class TestResults {
 
   printSummary() {
     const summary = this.getSummary();
-    
+
     console.log('\n' + '='.repeat(60));
     console.log('TEST EXECUTION SUMMARY');
     console.log('='.repeat(60));
@@ -116,7 +116,7 @@ class TestOrchestrator {
 
   async discoverTests() {
     const testDir = path.join(__dirname, 'journeys');
-    
+
     if (!fs.existsSync(testDir)) {
       logger.error(`Test directory not found: ${testDir}`);
       return false;
@@ -134,16 +134,16 @@ class TestOrchestrator {
   async executeTest(testFile) {
     const testName = path.basename(testFile, '.js');
     const startTime = Date.now();
-    
+
     logger.info(`Executing test: ${testName}`);
-    
+
     try {
       // Clear require cache to ensure fresh module load
       delete require.cache[require.resolve(testFile)];
-      
+
       const TestClass = require(testFile);
       const testInstance = new TestClass(this.config);
-      
+
       // Validate test class has required methods
       if (typeof testInstance.run !== 'function') {
         throw new Error('Test class must implement run() method');
@@ -152,7 +152,7 @@ class TestOrchestrator {
       // Execute the test
       const result = await testInstance.run();
       const duration = Date.now() - startTime;
-      
+
       if (result.success) {
         this.results.addTest(testName, 'passed', duration, null, result.details);
         logger.info(`✅ ${testName} passed (${duration}ms)`);
@@ -160,9 +160,9 @@ class TestOrchestrator {
         this.results.addTest(testName, 'failed', duration, result.error, result.details);
         logger.error(`❌ ${testName} failed: ${result.error}`);
       }
-      
+
       return result.success;
-      
+
     } catch (error) {
       const duration = Date.now() - startTime;
       this.results.addTest(testName, 'failed', duration, error.message);
@@ -174,7 +174,7 @@ class TestOrchestrator {
   async runAllTests() {
     logger.info('Starting TTTranscribe E2E Test Suite');
     logger.info('Configuration:', this.config);
-    
+
     if (!await this.discoverTests()) {
       logger.error('Failed to discover tests');
       return false;
@@ -198,7 +198,7 @@ class TestOrchestrator {
 async function main() {
   const orchestrator = new TestOrchestrator(CONFIG);
   const success = await orchestrator.runAllTests();
-  
+
   process.exit(success ? 0 : 1);
 }
 

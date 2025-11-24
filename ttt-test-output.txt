@@ -1,0 +1,44 @@
+TTTranscribe Direct API Test (Enhanced)
+=======================================
+Base: https://iamromeoly-tttranscribe.hf.space
+Time: 2025-11-24T12:38:31.760Z
+
+=== Testing /health ===
+Status: 200 OK
+Response: {
+  "status": "healthy",
+  "version": "1.0.0",
+  "uptime": 1200.110057039,
+  "timestamp": "2025-11-24T12:38:35.801Z",
+  "service": "tttranscribe",
+  "platform": "local",
+  "baseUrl": "http://localhost:8788",
+  "cache": {
+    "size": 1,
+    "hitRate": 0.75,
+    "hitCount": 3,
+    "missCount": 1,
+    "oldestEntry": "2025-11-24T12:19:20.096Z"
+  },
+  "environment": {
+    "hasAuthSecret": true,
+    "hasHfApiKey": true,
+    "asrProvider": "hf",
+    "port": 8788,
+    "tmpDir": "/tmp"
+  }
+}
+✅ Server reports it has an auth secret configured.
+
+=== Testing /transcribe WITH X-Engine-Auth ===
+Sending X-Engine-Auth: hf_sU...rW3gU
+Status: 202 Accepted
+Success! Job ID: f7e8a24c-e31d-4416-83a6-d7d1ed8438b6
+
+=== Polling Status for Job f7e8a24c-e31d-4416-83a6-d7d1ed8438b6 ===
+[1/60] Status: completed (100%) - completed
+
+=== Transcription Result ===
+Text length: 0 chars
+
+Result: SUCCESS

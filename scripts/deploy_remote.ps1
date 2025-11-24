@@ -7,7 +7,7 @@ param(
   [switch]$AutoCommit = $true,
   [string]$CommitMessage = "CI deploy - $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
   [string]$HfApiKey = "",
-  [string]$EngineSecret = "hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU",
+  [string]$EngineSecret = "",
   [switch]$SkipSecrets = $false
 )
 

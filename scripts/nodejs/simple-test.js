@@ -11,14 +11,14 @@ const { URL } = require('url');
 // Configuration
 const CONFIG = {
   BASE_URL: 'http://localhost:8788',
-  AUTH_SECRET: 'hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU',
+  AUTH_SECRET: process.env.ENGINE_SHARED_SECRET,
   TEST_URL: 'https://www.tiktok.com/@test/video/1234567890'
 };
 
 // Simple HTTP request function
 function makeRequest(method, endpoint, body = null, headers = {}) {
   const url = new URL(endpoint, CONFIG.BASE_URL);
-  
+
   return new Promise((resolve, reject) => {
     const options = {
       method,
@@ -96,10 +96,10 @@ async function testTranscribe() {
     }, {
       'X-Engine-Auth': CONFIG.AUTH_SECRET
     });
-    
+
     console.log(`Transcribe: ${response.statusCode}`);
     console.log('Response:', JSON.stringify(response.body, null, 2));
-    
+
     if (response.statusCode === 202 && response.body && response.body.id) {
       return response.body.id;
     }
@@ -116,7 +116,7 @@ async function testStatus(jobId) {
     const response = await makeRequest('GET', `/status/${jobId}`, null, {
       'X-Engine-Auth': CONFIG.AUTH_SECRET
     });
-    
+
     console.log(`Status: ${response.statusCode}`);
     console.log('Response:', JSON.stringify(response.body, null, 2));
     return response.statusCode === 200;
@@ -131,38 +131,38 @@ async function runTests() {
   console.log('Starting TTTranscribe Simple Tests');
   console.log('Configuration:', CONFIG);
   console.log('='.repeat(50));
-  
+
   // Test 1: Health check
   const healthOk = await testHealth();
   console.log('='.repeat(50));
-  
+
   if (!healthOk) {
     console.error('Health check failed, stopping tests');
     process.exit(1);
   }
-  
+
   // Test 2: Transcribe endpoint
   const jobId = await testTranscribe();
   console.log('='.repeat(50));
-  
+
   if (!jobId) {
     console.error('Transcribe test failed, stopping tests');
     process.exit(1);
   }
-  
+
   // Test 3: Status endpoint
   const statusOk = await testStatus(jobId);
   console.log('='.repeat(50));
-  
+
   // Summary
   console.log('TEST SUMMARY:');
   console.log(`Health Check: ${healthOk ? 'PASS' : 'FAIL'}`);
   console.log(`Transcribe: ${jobId ? 'PASS' : 'FAIL'}`);
   console.log(`Status: ${statusOk ? 'PASS' : 'FAIL'}`);
-  
+
   const allPassed = healthOk && jobId && statusOk;
   console.log(`Overall: ${allPassed ? 'PASS' : 'FAIL'}`);
-  
+
   process.exit(allPassed ? 0 : 1);
 }
 

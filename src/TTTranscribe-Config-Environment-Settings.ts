@@ -37,9 +37,9 @@ function isHuggingFaceSpaces(): boolean {
  * Detect if running locally
  */
 function isLocalEnvironment(): boolean {
-  return process.env.NODE_ENV === 'development' || 
-         process.env.NODE_ENV === 'local' ||
-         (!isHuggingFaceSpaces() && !process.env.PRODUCTION);
+  return process.env.NODE_ENV === 'development' ||
+    process.env.NODE_ENV === 'local' ||
+    (!isHuggingFaceSpaces() && !process.env.PRODUCTION);
 }
 
 /**
@@ -52,7 +52,7 @@ async function loadLocalEnv(): Promise<void> {
       if (await fs.pathExists(envPath)) {
         const envContent = await fs.readFile(envPath, 'utf-8');
         const envLines = envContent.split('\n');
-        
+
         for (const line of envLines) {
           const trimmed = line.trim();
           if (trimmed && !trimmed.startsWith('#')) {
@@ -108,10 +108,10 @@ function getBaseUrl(): string {
 export async function initializeConfig(): Promise<TTTranscribeConfig> {
   // Load local environment variables if in local development
   await loadLocalEnv();
-  
+
   const isHuggingFace = isHuggingFaceSpaces();
   const isLocal = isLocalEnvironment();
-  
+
   // Get configuration with environment-specific defaults
   // Compute tmpDir cross-platform
   const resolvedTmpDir = (() => {
@@ -126,7 +126,7 @@ export async function initializeConfig(): Promise<TTTranscribeConfig> {
 
   const config: TTTranscribeConfig = {
     port: parseInt(process.env.PORT || '8788'),
-    engineSharedSecret: process.env.ENGINE_SHARED_SECRET || 'hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU',
+    engineSharedSecret: process.env.ENGINE_SHARED_SECRET || '',
     hfApiKey: process.env.HF_API_KEY,
     asrProvider: process.env.ASR_PROVIDER || 'hf',
     tmpDir: resolvedTmpDir,
@@ -138,20 +138,32 @@ export async function initializeConfig(): Promise<TTTranscribeConfig> {
     rateLimitCapacity: parseInt(process.env.RATE_LIMIT_CAPACITY || '10'),
     rateLimitRefillPerMin: parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10')
   };
-  
+
   // Log environment information
   console.log(`🌍 Environment: ${isLocal ? 'local development' : 'production'}`);
   console.log(`🚀 Platform: ${isHuggingFace ? 'Hugging Face Spaces' : 'local'}`);
   console.log(`🔗 Base URL: ${config.baseUrl}`);
-  
+
+  // Critical security check: Ensure auth secret is set in production
+  if (isHuggingFace && !config.engineSharedSecret) {
+    console.error('❌ CRITICAL: ENGINE_SHARED_SECRET not set in Hugging Face Spaces!');
+    console.error('   Please configure this secret in your Space settings.');
+    process.exit(1);
+  }
+
+  if (isLocal && !config.engineSharedSecret) {
+    console.warn('⚠️  ENGINE_SHARED_SECRET not set in local environment.');
+    console.warn('   Authentication will fail unless you set this variable in .env.local');
+  }
+
   if (isLocal && !config.hfApiKey) {
     console.warn('⚠️  HF_API_KEY not set - transcription will fail without API key');
   }
-  
+
   if (isHuggingFace && !config.hfApiKey) {
     console.warn('⚠️  HF_API_KEY not configured in Hugging Face Spaces secrets');
   }
-  
+
   return config;
 }
 
