@@ -90,32 +90,6 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
   const now = new Date().toISOString();
   const jobRecord = jobRecords.get(requestId);
 
-  const status: Status = {
-    id: requestId,
-    status: mapPhaseToStatus(phase),
-    progress: percent,
-    submittedAt: jobRecord?.createdAt || now,
-    completedAt: phase === 'COMPLETED' ? now : undefined,
-    currentStep: mapPhaseToCurrentStep(phase),
-    result: phase === 'COMPLETED' && result ? {
-      transcription: text || '',
-      confidence: result.confidence || 0.95,
-      language: result.language || 'en',
-      duration: result.duration || 0,
-      wordCount: text ? text.split(' ').length : 0,
-      speakerCount: result.speakerCount || 1,
-      audioQuality: result.audioQuality || 'high',
-      processingTime: result.processingTime || 0
-    } : undefined,
-    metadata: metadata ? {
-      title: metadata.title,
-      author: metadata.author,
-      description: metadata.description,
-      url: metadata.url
-    } : undefined
-  };
-
-  statuses.set(requestId, status);
 
   // Update job record
   if (jobRecord) {
