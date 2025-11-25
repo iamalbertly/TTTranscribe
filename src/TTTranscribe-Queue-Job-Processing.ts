@@ -47,6 +47,8 @@ export type JobRecord = {
   note: string;
   createdAt: string;
   updatedAt: string;
+  phaseStartTime?: number; // Timestamp when current phase started
+  phaseElapsedTime?: number; // Time elapsed in current phase
 };
 
 // In-memory storage (replace with Redis later)
@@ -88,29 +90,79 @@ function mapPhaseToCurrentStep(phase: StatusPhase): string {
  */
 function updateStatus(requestId: string, phase: StatusPhase, percent: number, note: string, text?: string, truncated?: boolean, result?: any, metadata?: any): void {
   const now = new Date().toISOString();
+  const nowMs = Date.now();
   const jobRecord = jobRecords.get(requestId);
-
 
   // Update job record
   if (jobRecord) {
+    // If phase changed, record the elapsed time and start new phase
+    if (jobRecord.phase !== phase && jobRecord.phaseStartTime) {
+      jobRecord.phaseElapsedTime = nowMs - jobRecord.phaseStartTime;
+    }
+    
     jobRecord.phase = phase;
     jobRecord.percent = percent;
     jobRecord.note = note;
     jobRecord.updatedAt = now;
+    
+    // Start timing for new phase
+    if (!jobRecord.phaseStartTime || jobRecord.phase !== phase) {
+      jobRecord.phaseStartTime = nowMs;
+    }
+    
     jobRecords.set(requestId, jobRecord);
   }
 
-  // Calculate estimated completion
+  // Calculate estimated completion based on actual elapsed time and remaining work
   let estimatedCompletion: string | undefined;
-  if (phase !== 'COMPLETED' && phase !== 'FAILED') {
-    const nowMs = Date.now();
+  if (phase !== 'COMPLETED' && phase !== 'FAILED' && jobRecord) {
+    const totalElapsed = nowMs - new Date(jobRecord.createdAt).getTime();
+    const elapsedSeconds = totalElapsed / 1000;
+    
+    // Calculate remaining time based on progress and elapsed time
+    // If we have progress, estimate based on rate; otherwise use phase-specific defaults
     let remainingSeconds = 0;
-    switch (phase) {
-      case 'REQUEST_SUBMITTED': remainingSeconds = 180; break;
-      case 'DOWNLOADING': remainingSeconds = 150; break;
-      case 'TRANSCRIBING': remainingSeconds = 90; break;
-      case 'SUMMARIZING': remainingSeconds = 20; break;
+    
+    if (percent > 0 && elapsedSeconds > 0) {
+      // Estimate based on current progress rate
+      const progressRate = percent / elapsedSeconds; // percent per second
+      const remainingPercent = 100 - percent;
+      remainingSeconds = remainingPercent / progressRate;
+      
+      // Cap estimates to reasonable maximums per phase
+      const maxSecondsByPhase: Record<StatusPhase, number> = {
+        'REQUEST_SUBMITTED': 30,
+        'DOWNLOADING': 300, // 5 minutes max for download
+        'TRANSCRIBING': 600, // 10 minutes max for transcription
+        'SUMMARIZING': 60, // 1 minute max for summarization
+        'COMPLETED': 0,
+        'FAILED': 0
+      };
+      
+      remainingSeconds = Math.min(remainingSeconds, maxSecondsByPhase[phase] || 300);
+      
+      // Ensure minimum time based on phase
+      const minSecondsByPhase: Record<StatusPhase, number> = {
+        'REQUEST_SUBMITTED': 5,
+        'DOWNLOADING': 10,
+        'TRANSCRIBING': 30,
+        'SUMMARIZING': 5,
+        'COMPLETED': 0,
+        'FAILED': 0
+      };
+      
+      remainingSeconds = Math.max(remainingSeconds, minSecondsByPhase[phase] || 10);
+    } else {
+      // Fallback to phase-specific defaults if no progress yet
+      switch (phase) {
+        case 'REQUEST_SUBMITTED': remainingSeconds = 10; break;
+        case 'DOWNLOADING': remainingSeconds = 120; break;
+        case 'TRANSCRIBING': remainingSeconds = 180; break;
+        case 'SUMMARIZING': remainingSeconds = 30; break;
+        default: remainingSeconds = 60;
+      }
     }
+    
     estimatedCompletion = new Date(nowMs + remainingSeconds * 1000).toISOString();
   }
 

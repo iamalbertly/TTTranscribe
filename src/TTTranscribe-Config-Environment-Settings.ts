@@ -26,6 +26,8 @@ export interface TTTranscribeConfig {
  */
 function isHuggingFaceSpaces(): boolean {
   return !!(
+    process.env.SPACE_ID ||
+    process.env.SPACE_HOST ||
     process.env.HF_SPACE_ID ||
     process.env.HF_SPACE_URL ||
     process.env.HUGGINGFACE_SPACE_ID ||
@@ -82,11 +84,15 @@ function getBaseUrl(): string {
 
   if (isHuggingFaceSpaces()) {
     // On Hugging Face Spaces, prefer provided URLs
+    if (process.env.SPACE_HOST) {
+      // SPACE_HOST is the full hostname (e.g., username-spacename.hf.space)
+      return `https://${process.env.SPACE_HOST}`;
+    }
     if (process.env.HF_SPACE_URL) return process.env.HF_SPACE_URL;
     if (process.env.HUGGINGFACE_SPACE_URL) return process.env.HUGGINGFACE_SPACE_URL as string;
 
-    // Derive from HF_SPACE_ID if present (e.g., iamromeoly/TTTranscibe -> iamromeoly-tttranscibe.hf.space)
-    const rawId = process.env.HF_SPACE_ID || process.env.HUGGINGFACE_SPACE_ID;
+    // Derive from SPACE_ID or HF_SPACE_ID if present (e.g., iamromeoly/TTTranscibe -> iamromeoly-tttranscibe.hf.space)
+    const rawId = process.env.SPACE_ID || process.env.HF_SPACE_ID || process.env.HUGGINGFACE_SPACE_ID;
     if (rawId) {
       const slug = rawId.replace(/[\/_]+/g, '-').toLowerCase();
       return `https://${slug}.hf.space`;

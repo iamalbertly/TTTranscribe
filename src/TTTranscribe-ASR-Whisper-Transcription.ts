@@ -36,13 +36,14 @@ export async function transcribe(wavPath: string): Promise<string> {
     }
 
     const model = 'openai/whisper-large-v3';
-    const apiUrl = `https://api-inference.huggingface.co/models/${model}`;
+    // Use the new router endpoint instead of deprecated api-inference endpoint
+    const apiUrl = `https://router.huggingface.co/${model}`;
     
     // Create form data with audio file
     const formData = new FormData();
     formData.append('file', fs.createReadStream(wavPath));
     
-    const response = await fetch(apiUrl, {
+    let response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${HF_API_KEY}`,
@@ -51,9 +52,37 @@ export async function transcribe(wavPath: string): Promise<string> {
       body: formData
     });
     
+    // Handle 410 error (deprecated endpoint) - retry with new endpoint if needed
+    if (response.status === 410) {
+      console.warn('Received 410 error, endpoint may have changed. Using router endpoint.');
+      // Already using router endpoint, so this shouldn't happen, but log it
+    }
+    
+    // Handle rate limiting and model loading
+    if (response.status === 503) {
+      const errorText = await response.text();
+      // Model might be loading, wait and retry
+      console.log('Model is loading, waiting 10 seconds before retry...');
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      
+      // Retry the request with new form data
+      const retryFormData = new FormData();
+      retryFormData.append('file', fs.createReadStream(wavPath));
+      response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${HF_API_KEY}`,
+          ...retryFormData.getHeaders()
+        },
+        body: retryFormData
+      });
+    }
+    
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`ASR API error ${response.status}: ${errorText}`);
+      // Truncate error text if it's HTML (like the 410 error page)
+      const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
+      throw new Error(`ASR API error ${response.status}: ${truncatedError}`);
     }
     
     const result = await response.json();

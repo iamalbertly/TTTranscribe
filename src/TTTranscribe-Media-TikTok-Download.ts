@@ -4,7 +4,15 @@ import * as path from 'path';
 import fetch from 'node-fetch';
 
 // Get TMP_DIR from environment with proper fallback
-const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
+// Check for Hugging Face Spaces environment variables
+const isHuggingFace = !!(
+  process.env.SPACE_ID ||
+  process.env.SPACE_HOST ||
+  process.env.HF_SPACE_ID ||
+  process.env.HF_SPACE_URL ||
+  process.env.HUGGINGFACE_SPACE_ID ||
+  process.env.HUGGINGFACE_SPACE_URL
+);
 const isWindows = process.platform === 'win32';
 
 let TMP_DIR: string;
@@ -79,7 +87,15 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     const execAsync = promisify(exec);
     
     // Determine yt-dlp command based on environment
-    const isHuggingFace = process.env.HF_SPACE_ID !== undefined;
+    // Check for Hugging Face Spaces environment variables
+    const isHuggingFace = !!(
+      process.env.SPACE_ID ||
+      process.env.SPACE_HOST ||
+      process.env.HF_SPACE_ID ||
+      process.env.HF_SPACE_URL ||
+      process.env.HUGGINGFACE_SPACE_ID ||
+      process.env.HUGGINGFACE_SPACE_URL
+    );
     const isWindows = process.platform === 'win32';
     
     let ytdlpCommand: string;
