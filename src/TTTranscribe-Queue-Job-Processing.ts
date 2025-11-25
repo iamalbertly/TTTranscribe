@@ -281,7 +281,20 @@ export async function startJob(url: string): Promise<string> {
       // Phase 2: Transcribing
       updateStatus(id, 'TRANSCRIBING', 35, 'Transcribing audio');
 
-      const rawText = await transcribe(wavPath);
+      let rawText: string;
+      try {
+        rawText = await transcribe(wavPath);
+        
+        // Check if transcription failed (error message in result)
+        if (rawText.startsWith('[Transcription failed') || rawText.startsWith('[PLACEHOLDER')) {
+          console.error(`Transcription returned error/placeholder for ${id}: ${rawText.substring(0, 100)}`);
+          // Don't fail the job, but log the issue - the text will be returned to client
+        }
+      } catch (transcribeError: any) {
+        console.error(`Transcription error for ${id}: ${transcribeError.message}`);
+        updateStatus(id, 'FAILED', 0, `Transcription failed: ${transcribeError.message}`);
+        throw transcribeError; // Re-throw to be caught by outer catch
+      }
 
       // Apply text truncation if needed
       const maxLength = parseInt(process.env.KEEP_TEXT_MAX || '10000');

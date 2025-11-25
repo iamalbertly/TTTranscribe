@@ -1,6 +1,7 @@
 import 'dotenv/config'; // Load environment variables
 import fetch from 'node-fetch';
 import * as fs from 'fs';
+import * as path from 'path';
 import FormData from 'form-data';
 
 // Get environment variables with proper fallbacks
@@ -16,14 +17,33 @@ export async function transcribe(wavPath: string): Promise<string> {
     try {
       await fs.promises.access(wavPath, fs.constants.R_OK);
       
-      // Check if it's a placeholder file
-      const content = await fs.promises.readFile(wavPath, 'utf8');
-      if (content.startsWith('# Placeholder audio file') || content.startsWith('[Transcription placeholder')) {
-        console.log(`Detected placeholder file, returning placeholder transcription`);
-        return `[Transcription placeholder for ${wavPath} - Placeholder audio file detected]`;
+      // Check file size - placeholder files are typically very small (< 1KB)
+      const stats = await fs.promises.stat(wavPath);
+      if (stats.size < 1024) {
+        // Small file might be a placeholder - check first few bytes as text
+        const buffer = await fs.promises.readFile(wavPath);
+        const firstBytes = buffer.slice(0, 100).toString('utf8');
+        if (firstBytes.startsWith('# Placeholder') || firstBytes.startsWith('[Transcription placeholder')) {
+          console.log(`Detected placeholder file, returning placeholder transcription`);
+          return `[Transcription placeholder for ${wavPath} - Placeholder audio file detected]`;
+        }
       }
-    } catch (error) {
-      console.warn(`Cannot access audio file ${wavPath}, using fallback transcription`);
+      
+      // Validate it's a real audio file (WAV files start with "RIFF")
+      if (stats.size > 1024) {
+        const buffer = await fs.promises.readFile(wavPath);
+        const header = buffer.slice(0, 4).toString('ascii');
+        if (header !== 'RIFF' && stats.size < 10000) {
+          // Might be a text placeholder file
+          const textContent = buffer.slice(0, 100).toString('utf8');
+          if (textContent.includes('Placeholder') || textContent.includes('placeholder')) {
+            console.log(`Detected placeholder file by header check`);
+            return `[Transcription placeholder for ${wavPath} - Placeholder audio file detected]`;
+          }
+        }
+      }
+    } catch (error: any) {
+      console.warn(`Cannot access audio file ${wavPath}: ${error.message}`);
       // Return a placeholder transcription for Hugging Face Spaces
       return `[Transcription placeholder for ${wavPath} - File access restricted in Hugging Face Spaces]`;
     }
@@ -38,11 +58,14 @@ export async function transcribe(wavPath: string): Promise<string> {
     const model = 'openai/whisper-large-v3';
     
     // Try multiple endpoint formats with fallback
-    // Note: The inference API endpoint may return 410 (deprecated) but still function
+    // Note: The inference API endpoint format is: https://api-inference.huggingface.co/models/{model}
     const endpointFormats = [
-      `https://api-inference.huggingface.co/models/${model}`, // Original endpoint (may return 410 but still work)
-      `https://router.huggingface.co/${model}`, // Router endpoint without /models/
+      `https://api-inference.huggingface.co/models/${model}`, // Standard inference API endpoint
     ];
+    
+    if (!HF_API_KEY) {
+      throw new Error('HF_API_KEY is required for transcription');
+    }
     
     let lastError: Error | null = null;
     let response: any = null;
@@ -51,11 +74,21 @@ export async function transcribe(wavPath: string): Promise<string> {
     // Try each endpoint format until one works
     for (const apiUrl of endpointFormats) {
       try {
-        // Create form data with audio file
-        const formData = new FormData();
-        formData.append('file', fs.createReadStream(wavPath));
+        // Verify file exists and get its size
+        const stats = await fs.promises.stat(wavPath);
+        if (stats.size === 0) {
+          throw new Error(`Audio file is empty: ${wavPath}`);
+        }
         
-        console.log(`Attempting transcription with endpoint: ${apiUrl}`);
+        console.log(`Attempting transcription with endpoint: ${apiUrl}, file size: ${stats.size} bytes`);
+        
+        // Create form data with audio file
+        // Hugging Face Inference API expects the file field name to be 'file' or 'inputs'
+        const formData = new FormData();
+        formData.append('file', fs.createReadStream(wavPath), {
+          filename: path.basename(wavPath),
+          contentType: 'audio/wav'
+        });
         
         response = await fetch(apiUrl, {
           method: 'POST',
@@ -151,23 +184,28 @@ export async function transcribe(wavPath: string): Promise<string> {
       throw lastError || new Error(`ASR API error: All endpoints failed. Last error: ${truncatedError}`);
     }
     
-    // Parse the response as JSON
+    // Parse the response as JSON (response body can only be read once!)
     let result: any;
+    const responseText = await response.text();
+    
     try {
-      const responseText = await response.text();
-      // Check if response is HTML (error page) - this shouldn't happen if we got here, but check anyway
+      // Check if response is HTML (error page)
       if (responseText.trim().startsWith('<!') || responseText.includes('<html')) {
-        throw new Error('Response is HTML, not JSON. This should not happen after endpoint validation.');
+        throw new Error('Response is HTML, not JSON. Endpoint may have returned an error page.');
       }
+      
+      // Try to parse as JSON
       result = JSON.parse(responseText);
     } catch (parseError: any) {
-      // If we can't parse as JSON, it might be a plain string response
-      const responseText = await response.text();
-      // If it's a string that looks like a transcription, use it
-      if (typeof responseText === 'string' && responseText.length > 0 && !responseText.includes('<')) {
+      // If JSON parsing fails, check if it's a plain string transcription
+      if (responseText && responseText.length > 0 && !responseText.includes('<') && !responseText.includes('Error')) {
+        // Might be a plain text transcription response
         result = responseText;
+        console.log(`Received plain text response (not JSON), using as transcription`);
       } else {
-        throw new Error(`Failed to parse API response: ${parseError.message}. Response: ${responseText.substring(0, 200)}`);
+        // Log the actual response for debugging
+        console.error(`Failed to parse API response. Status: ${response.status}, Response: ${responseText.substring(0, 500)}`);
+        throw new Error(`Failed to parse API response: ${parseError.message}. Response preview: ${responseText.substring(0, 200)}`);
       }
     }
     
