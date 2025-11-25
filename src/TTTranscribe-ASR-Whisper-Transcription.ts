@@ -66,10 +66,17 @@ export async function transcribe(wavPath: string): Promise<string> {
           body: formData
         });
         
-        // Handle 410 error (deprecated endpoint) - still try to read response as it may work
+        // Handle 410 error (deprecated endpoint) - check if response is HTML (error page) or JSON (might still work)
         if (response.status === 410) {
-          console.warn(`Endpoint ${apiUrl} returned 410 (deprecated), but attempting to use response anyway...`);
-          // Don't continue - try to process the response even if deprecated
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('text/html')) {
+            console.warn(`Endpoint ${apiUrl} returned 410 with HTML (fully deprecated), trying next format...`);
+            lastError = new Error(`Endpoint deprecated: ${apiUrl}`);
+            continue;
+          } else {
+            console.warn(`Endpoint ${apiUrl} returned 410 but content-type suggests it might work, attempting to use...`);
+            // Don't continue - try to process the response even if deprecated
+          }
         }
         
         // Handle 404 error - try next format
@@ -98,13 +105,28 @@ export async function transcribe(wavPath: string): Promise<string> {
           });
         }
         
-        // If we got a successful response (200) or deprecated but functional (410), break out of the loop
-        if (response.ok || response.status === 410) {
-          if (response.status === 410) {
-            console.log(`Using deprecated but functional endpoint: ${apiUrl}`);
-          } else {
-            console.log(`Successfully connected to endpoint: ${apiUrl}`);
+        // Check if 410 response is HTML (fully deprecated) or might still work
+        if (response.status === 410) {
+          const contentType = response.headers.get('content-type') || '';
+          if (contentType.includes('text/html')) {
+            // Clone response to read body without consuming it
+            const clonedResponse = response.clone();
+            const text = await clonedResponse.text();
+            if (text.trim().startsWith('<!') || text.includes('<html')) {
+              console.warn(`Endpoint ${apiUrl} returned 410 with HTML (fully deprecated), trying next format...`);
+              lastError = new Error(`Endpoint deprecated: ${apiUrl}`);
+              continue;
+            }
           }
+          // If 410 but not HTML, might still work
+          console.log(`Using deprecated but potentially functional endpoint: ${apiUrl}`);
+          successfulEndpoint = apiUrl;
+          break;
+        }
+        
+        // If we got a successful response, break out of the loop
+        if (response.ok) {
+          console.log(`Successfully connected to endpoint: ${apiUrl}`);
           successfulEndpoint = apiUrl;
           break;
         }
@@ -123,18 +145,31 @@ export async function transcribe(wavPath: string): Promise<string> {
     }
     
     // If all endpoints failed, throw the last error
-    if (!response || (!response.ok && response.status !== 410)) {
+    if (!response || !response.ok) {
       const errorText = response ? await response.text() : 'No response';
       const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
       throw lastError || new Error(`ASR API error: All endpoints failed. Last error: ${truncatedError}`);
     }
     
-    // For 410 responses, try to parse the response body as it may still contain valid data
-    if (response.status === 410) {
-      console.warn('Received 410 (deprecated) but attempting to parse response...');
+    // Parse the response as JSON
+    let result: any;
+    try {
+      const responseText = await response.text();
+      // Check if response is HTML (error page) - this shouldn't happen if we got here, but check anyway
+      if (responseText.trim().startsWith('<!') || responseText.includes('<html')) {
+        throw new Error('Response is HTML, not JSON. This should not happen after endpoint validation.');
+      }
+      result = JSON.parse(responseText);
+    } catch (parseError: any) {
+      // If we can't parse as JSON, it might be a plain string response
+      const responseText = await response.text();
+      // If it's a string that looks like a transcription, use it
+      if (typeof responseText === 'string' && responseText.length > 0 && !responseText.includes('<')) {
+        result = responseText;
+      } else {
+        throw new Error(`Failed to parse API response: ${parseError.message}. Response: ${responseText.substring(0, 200)}`);
+      }
     }
-    
-    const result = await response.json();
     
     // Handle different response formats
     let text = '';
