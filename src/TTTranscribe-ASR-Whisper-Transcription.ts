@@ -36,54 +36,92 @@ export async function transcribe(wavPath: string): Promise<string> {
     }
 
     const model = 'openai/whisper-large-v3';
-    // Use the new router endpoint instead of deprecated api-inference endpoint
-    // Try both formats: with and without /models/ path
-    let apiUrl = `https://router.huggingface.co/models/${model}`;
     
-    // Create form data with audio file
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(wavPath));
+    // Try multiple endpoint formats with fallback
+    const endpointFormats = [
+      `https://api-inference.huggingface.co/models/${model}`, // Original endpoint (may still work)
+      `https://router.huggingface.co/${model}`, // Router endpoint without /models/
+      `https://router.huggingface.co/models/${model}`, // Router endpoint with /models/
+    ];
     
-    let response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${HF_API_KEY}`,
-        ...formData.getHeaders()
-      },
-      body: formData
-    });
+    let lastError: Error | null = null;
+    let response: any = null;
     
-    // Handle 410 error (deprecated endpoint) - retry with new endpoint if needed
-    if (response.status === 410) {
-      console.warn('Received 410 error, endpoint may have changed. Using router endpoint.');
-      // Already using router endpoint, so this shouldn't happen, but log it
+    // Try each endpoint format until one works
+    for (const apiUrl of endpointFormats) {
+      try {
+        // Create form data with audio file
+        const formData = new FormData();
+        formData.append('file', fs.createReadStream(wavPath));
+        
+        console.log(`Attempting transcription with endpoint: ${apiUrl}`);
+        
+        response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${HF_API_KEY}`,
+            ...formData.getHeaders()
+          },
+          body: formData
+        });
+        
+        // Handle 410 error (deprecated endpoint) - try next format
+        if (response.status === 410) {
+          console.warn(`Endpoint ${apiUrl} returned 410 (deprecated), trying next format...`);
+          lastError = new Error(`Endpoint deprecated: ${apiUrl}`);
+          continue;
+        }
+        
+        // Handle 404 error - try next format
+        if (response.status === 404) {
+          console.warn(`Endpoint ${apiUrl} returned 404 (not found), trying next format...`);
+          lastError = new Error(`Endpoint not found: ${apiUrl}`);
+          continue;
+        }
+        
+        // Handle rate limiting and model loading
+        if (response.status === 503) {
+          const errorText = await response.text();
+          console.log('Model is loading, waiting 10 seconds before retry...');
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          
+          // Retry the request with new form data
+          const retryFormData = new FormData();
+          retryFormData.append('file', fs.createReadStream(wavPath));
+          response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${HF_API_KEY}`,
+              ...retryFormData.getHeaders()
+            },
+            body: retryFormData
+          });
+        }
+        
+        // If we got a successful response, break out of the loop
+        if (response.ok) {
+          console.log(`Successfully connected to endpoint: ${apiUrl}`);
+          break;
+        }
+        
+        // If not successful and not a retryable error, try next endpoint
+        if (response.status !== 503) {
+          const errorText = await response.text();
+          lastError = new Error(`ASR API error ${response.status} from ${apiUrl}: ${errorText.substring(0, 200)}`);
+          continue;
+        }
+      } catch (fetchError: any) {
+        console.warn(`Error with endpoint ${apiUrl}: ${fetchError.message}`);
+        lastError = fetchError;
+        continue;
+      }
     }
     
-    // Handle rate limiting and model loading
-    if (response.status === 503) {
-      const errorText = await response.text();
-      // Model might be loading, wait and retry
-      console.log('Model is loading, waiting 10 seconds before retry...');
-      await new Promise(resolve => setTimeout(resolve, 10000));
-      
-      // Retry the request with new form data
-      const retryFormData = new FormData();
-      retryFormData.append('file', fs.createReadStream(wavPath));
-      response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${HF_API_KEY}`,
-          ...retryFormData.getHeaders()
-        },
-        body: retryFormData
-      });
-    }
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      // Truncate error text if it's HTML (like the 410 error page)
+    // If all endpoints failed, throw the last error
+    if (!response || !response.ok) {
+      const errorText = response ? await response.text() : 'No response';
       const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
-      throw new Error(`ASR API error ${response.status}: ${truncatedError}`);
+      throw lastError || new Error(`ASR API error: All endpoints failed. Last error: ${truncatedError}`);
     }
     
     const result = await response.json();
