@@ -38,14 +38,15 @@ export async function transcribe(wavPath: string): Promise<string> {
     const model = 'openai/whisper-large-v3';
     
     // Try multiple endpoint formats with fallback
+    // Note: The inference API endpoint may return 410 (deprecated) but still function
     const endpointFormats = [
-      `https://api-inference.huggingface.co/models/${model}`, // Original endpoint (may still work)
+      `https://api-inference.huggingface.co/models/${model}`, // Original endpoint (may return 410 but still work)
       `https://router.huggingface.co/${model}`, // Router endpoint without /models/
-      `https://router.huggingface.co/models/${model}`, // Router endpoint with /models/
     ];
     
     let lastError: Error | null = null;
     let response: any = null;
+    let successfulEndpoint: string | null = null;
     
     // Try each endpoint format until one works
     for (const apiUrl of endpointFormats) {
@@ -65,11 +66,10 @@ export async function transcribe(wavPath: string): Promise<string> {
           body: formData
         });
         
-        // Handle 410 error (deprecated endpoint) - try next format
+        // Handle 410 error (deprecated endpoint) - still try to read response as it may work
         if (response.status === 410) {
-          console.warn(`Endpoint ${apiUrl} returned 410 (deprecated), trying next format...`);
-          lastError = new Error(`Endpoint deprecated: ${apiUrl}`);
-          continue;
+          console.warn(`Endpoint ${apiUrl} returned 410 (deprecated), but attempting to use response anyway...`);
+          // Don't continue - try to process the response even if deprecated
         }
         
         // Handle 404 error - try next format
@@ -98,9 +98,14 @@ export async function transcribe(wavPath: string): Promise<string> {
           });
         }
         
-        // If we got a successful response, break out of the loop
-        if (response.ok) {
-          console.log(`Successfully connected to endpoint: ${apiUrl}`);
+        // If we got a successful response (200) or deprecated but functional (410), break out of the loop
+        if (response.ok || response.status === 410) {
+          if (response.status === 410) {
+            console.log(`Using deprecated but functional endpoint: ${apiUrl}`);
+          } else {
+            console.log(`Successfully connected to endpoint: ${apiUrl}`);
+          }
+          successfulEndpoint = apiUrl;
           break;
         }
         
@@ -118,10 +123,15 @@ export async function transcribe(wavPath: string): Promise<string> {
     }
     
     // If all endpoints failed, throw the last error
-    if (!response || !response.ok) {
+    if (!response || (!response.ok && response.status !== 410)) {
       const errorText = response ? await response.text() : 'No response';
       const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
       throw lastError || new Error(`ASR API error: All endpoints failed. Last error: ${truncatedError}`);
+    }
+    
+    // For 410 responses, try to parse the response body as it may still contain valid data
+    if (response.status === 410) {
+      console.warn('Received 410 (deprecated) but attempting to parse response...');
     }
     
     const result = await response.json();
