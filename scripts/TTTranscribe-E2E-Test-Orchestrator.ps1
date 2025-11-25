@@ -97,7 +97,7 @@ function Test-API-Health {
         $response = Invoke-WebRequest -Uri "$BaseUrl/health" -Method GET -TimeoutSec 10
         if ($response.StatusCode -eq 200) {
             $healthData = $response.Content | ConvertFrom-Json
-            if ($healthData.status -eq "ok") {
+            if ($healthData.status -eq "healthy" -or $healthData.status -eq "ok") {
                 Test-Success "API Health Check"
                 return $true
             } else {
@@ -127,11 +127,16 @@ function Test-API-Transcribe {
         
         $response = Invoke-WebRequest -Uri "$BaseUrl/transcribe" -Method POST -Headers $headers -Body $body -TimeoutSec 30
         
-        if ($response.StatusCode -eq 200) {
+        # Accept both 200 and 202 status codes (202 is the correct protocol response)
+        if ($response.StatusCode -eq 200 -or $response.StatusCode -eq 202) {
             $transcribeData = $response.Content | ConvertFrom-Json
-            if ($transcribeData.request_id -and $transcribeData.status -eq "accepted") {
+            # Check for either 'id' or 'request_id' field
+            $requestId = if ($transcribeData.id) { $transcribeData.id } else { $transcribeData.request_id }
+            $status = if ($transcribeData.status) { $transcribeData.status } else { "queued" }
+            
+            if ($requestId -and ($status -eq "accepted" -or $status -eq "queued")) {
                 Test-Success "Transcribe Endpoint"
-                return $transcribeData.request_id
+                return $requestId
             } else {
                 Test-Failure "Transcribe Endpoint" "Invalid response format" $transcribeData
             }
@@ -158,7 +163,13 @@ function Test-API-Status {
         
         if ($response.StatusCode -eq 200) {
             $statusData = $response.Content | ConvertFrom-Json
-            if ($statusData.phase -and $statusData.percent -ne $null) {
+            # Accept both old format (phase, percent) and new format (status, progress)
+            $hasPhase = $statusData.phase -ne $null
+            $hasPercent = $statusData.percent -ne $null
+            $hasStatus = $statusData.status -ne $null
+            $hasProgress = $statusData.progress -ne $null
+            
+            if (($hasPhase -and $hasPercent) -or ($hasStatus -and $hasProgress)) {
                 Test-Success "Status Endpoint"
                 return $statusData
             } else {

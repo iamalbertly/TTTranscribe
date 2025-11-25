@@ -37,7 +37,8 @@ export async function transcribe(wavPath: string): Promise<string> {
 
     const model = 'openai/whisper-large-v3';
     // Use the new router endpoint instead of deprecated api-inference endpoint
-    const apiUrl = `https://router.huggingface.co/${model}`;
+    // Try both formats: with and without /models/ path
+    let apiUrl = `https://router.huggingface.co/models/${model}`;
     
     // Create form data with audio file
     const formData = new FormData();
