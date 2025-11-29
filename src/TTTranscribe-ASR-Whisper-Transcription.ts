@@ -59,13 +59,16 @@ export async function transcribe(wavPath: string): Promise<string> {
     }
 
     // Prefer an explicit model via ASR_MODEL env; fall back to a prioritized list of supported models.
-    // NOTE: openai/whisper-large-v3 is known to be deprecated; prefer v2 or other supported ids.
+    // NOTE: openai/whisper-* models are deprecated on HF Inference API
+    // Use actively maintained alternatives like distil-whisper or faster-whisper
     const configuredModel = (process.env.ASR_MODEL || '').trim();
     const preferredModels = configuredModel ? [configuredModel] : [
-      'openai/whisper-large-v2',
+      'distil-whisper/distil-large-v3',
+      'Systran/faster-whisper-large-v3',
+      'distil-whisper/distil-large-v2',
+      'openai/whisper-large-v2',  // Keep as fallback even if deprecated
       'openai/whisper-large',
-      'openai/whisper-medium',
-      'openai/whisper-small'
+      'openai/whisper-medium'
     ];
 
     // Build endpoint list: env-specified HF_API_URLS first, then construct from preferredModels
