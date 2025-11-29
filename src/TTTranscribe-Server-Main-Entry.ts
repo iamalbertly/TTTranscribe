@@ -183,8 +183,8 @@ app.post('/transcribe', authMiddleware, async (c) => {
       }, 400);
     }
     
-    const { url } = body;
-    
+    const { url, requestId: businessEngineRequestId } = body;
+
     if (!url || typeof url !== 'string') {
       return c.json({
         error: 'invalid_url',
@@ -195,7 +195,7 @@ app.post('/transcribe', authMiddleware, async (c) => {
         }
       }, 400);
     }
-    
+
     // Basic TikTok URL validation
     if (!url.includes('tiktok.com') && !url.includes('vm.tiktok.com')) {
       return c.json({
@@ -207,8 +207,9 @@ app.post('/transcribe', authMiddleware, async (c) => {
         }
       }, 400);
     }
-    
-    const requestId = await startJob(url);
+
+    // Start the transcription job with optional Business Engine request ID for webhook callback
+    const requestId = await startJob(url, businessEngineRequestId);
     
     return c.json({ 
       id: requestId, 
@@ -223,6 +224,68 @@ app.post('/transcribe', authMiddleware, async (c) => {
     return c.json({
       error: 'processing_failed',
       message: 'Failed to start transcription job',
+      details: { reason: 'internal_error' }
+    }, 500);
+  }
+});
+
+/**
+ * POST /estimate
+ * Estimate cost for transcribing a video before submitting
+ * Body: { url: string }
+ * Returns: { estimatedCost, estimatedDuration, modelUsed }
+ */
+app.post('/estimate', authMiddleware, async (c) => {
+  try {
+    let body;
+    try {
+      body = await c.req.json();
+    } catch (jsonError) {
+      return c.json({
+        error: 'invalid_request',
+        message: 'Invalid JSON in request body',
+        details: {
+          reason: 'malformed_json',
+          expectedFormat: '{"url": "https://www.tiktok.com/@username/video/1234567890"}'
+        }
+      }, 400);
+    }
+
+    const { url } = body;
+
+    if (!url || typeof url !== 'string') {
+      return c.json({
+        error: 'invalid_url',
+        message: 'URL must be a valid TikTok video URL',
+        details: {
+          providedUrl: url || 'undefined',
+          expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
+        }
+      }, 400);
+    }
+
+    // For now, return estimated cost based on average TikTok video length (30-60 seconds)
+    // In the future, we could use yt-dlp to fetch video metadata without downloading
+    const estimatedDurationSeconds = 45; // Average TikTok video length
+    const modelUsed = process.env.WHISPER_MODEL_SIZE || 'base';
+
+    // Calculate estimated credits based on duration
+    // This is a simple estimate - Business Engine will have the actual pricing logic
+    const creditsPerMinute = modelUsed === 'large' ? 2 : 1;
+    const estimatedCredits = Math.ceil((estimatedDurationSeconds / 60) * creditsPerMinute);
+
+    return c.json({
+      estimatedCredits,
+      estimatedDurationSeconds,
+      modelUsed: `openai-whisper-${modelUsed}`,
+      note: 'This is an estimate. Actual cost will be based on real audio duration.',
+    });
+
+  } catch (error) {
+    console.error('Error in /estimate:', error);
+    return c.json({
+      error: 'processing_failed',
+      message: 'Failed to estimate cost',
       details: { reason: 'internal_error' }
     }, 500);
   }

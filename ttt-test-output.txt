@@ -2,23 +2,24 @@ TTTranscribe Direct API Test (Enhanced)
 =======================================
 Base: https://iamromeoly-tttranscribe.hf.space
 Test URL: https://vm.tiktok.com/ZMAKpqkpN/
-Time: 2025-11-29T21:06:59.048Z
+Time: 2025-11-29T21:50:36.355Z
 
 === Testing /health ===
 Status: 200 OK
 Response: {
   "status": "healthy",
   "version": "1.0.0",
-  "uptime": 206.412758085,
-  "timestamp": "2025-11-29T21:07:04.894Z",
+  "uptime": 466.697452097,
+  "timestamp": "2025-11-29T21:50:43.672Z",
   "service": "tttranscribe",
   "platform": "huggingface-spaces",
   "baseUrl": "https://iamromeoly-tttranscribe.hf.space",
   "cache": {
-    "size": 0,
+    "size": 1,
     "hitRate": 0,
     "hitCount": 0,
-    "missCount": 0
+    "missCount": 1,
+    "oldestEntry": "2025-11-29T21:44:47.250Z"
   },
   "environment": {
     "hasAuthSecret": true,
@@ -35,11 +36,11 @@ Sending X-Engine-Auth header (masked), secretLength=56
 URL: https://iamromeoly-tttranscribe.hf.space/transcribe
 Payload: { url: "https://vm.tiktok.com/ZMAKpqkpN/" }
 Status: 202 Accepted
-Success! Job ID: d5093da2-a71e-428a-93c7-0f11e4693056
+Success! Job ID: 335d2787-299b-4d7c-820a-67e904c02710
 Full response: {
-  "id": "d5093da2-a71e-428a-93c7-0f11e4693056",
+  "id": "335d2787-299b-4d7c-820a-67e904c02710",
   "status": "queued",
-  "submittedAt": "2025-11-29T21:07:07.820Z",
+  "submittedAt": "2025-11-29T21:50:47.253Z",
   "estimatedProcessingTime": 300,
   "url": "https://vm.tiktok.com/ZMAKpqkpN/"
 }
@@ -47,30 +48,25 @@ Full response: {
 === WAITING FOR TRANSCRIPTION ===
 This can take 30 seconds to several minutes depending on video length and service load.
 
-=== Polling Status for Job d5093da2-a71e-428a-93c7-0f11e4693056 ===
-[1/120] Status: processing (15%) - audio_extraction
-[2/120] Status: failed (0%) - failed
-❌ Job failed: Unknown error
-Full error response: {
-  "id": "d5093da2-a71e-428a-93c7-0f11e4693056",
-  "status": "failed",
-  "progress": 0,
-  "submittedAt": "2025-11-29T21:07:07.819Z",
-  "currentStep": "failed",
-  "server": {
-    "requestId": "d5093da2-a71e-428a-93c7-0f11e4693056",
-    "phaseStartTime": 1764450427819,
-    "phaseElapsedTime": 2733,
-    "createdAt": "2025-11-29T21:07:07.819Z",
-    "updatedAt": "2025-11-29T21:07:10.552Z"
-  }
-}
+=== Polling Status for Job 335d2787-299b-4d7c-820a-67e904c02710 ===
+[1/120] Status: completed (100%) - completed
+
+=== Transcription Result ===
+
+✅ TRANSCRIPT RETRIEVED (1937 characters):
+---
+According to MIT, what is the first market that you go after when you have an idea for your business? The market that's going to get your business off the ground. You might think a massive market with a lot of people, a lot of money, or both, but you'd be wrong. According to MIT, that is not the first market you go after. And in fact, your decision here could make or break your business. First, I'm Saul. I'm building my own AI startup and back in 2022, I completed MIT's accelerator Delta V. Duri
+ng the program, you're taught the 24 steps of being a disciplined entrepreneur. And this is step two, selecting your beachhead market. So what is the initial market that you should go after? Well, the market that you go after needs to have three specific characteristics. One, the customers in the market need to purchase very similar products. Two, the customers in your market buy in the same way as one another, and they expect the same type of value, which means that if you can sell to one of th
+em, you can sell to all of them all with the same pitch. Three, your customers actually talk to one another, whether in person or online. And this allows you to make use of word of mouth later on. Now, this is important because if you choose a market that satisfies all three of these conditions, you'll be able to take over that market really quickly. Then, once you conquer that market, even if it's small, you'll be able to jump to adjacent markets from there on out. And this is actually how you 
+win and scale as a startup. So from the previous step in which you defined a lot of markets, you're probably going to need to refine this even further. But it's worth it because if you get this right, you're setting yourself up for success, which leads me to the next step of building your end user profile, which I'm going to cover in the next video in my according to MIT series. And with that, as always, see you tomorrow, guys. Ciao.
+---
+Confidence: 0.95
+Language: en
+Duration: 30.5s
+Word Count: 362
+
+✅ SUCCESS: Transcription completed and retrieved!
 
 ==================================================
-FINAL RESULT: ❌ FAILED
+FINAL RESULT: ✅ SUCCESS
 ==================================================
-
-Diagnostics:
-- Verify TTT_BASE and TTT_SHARED_SECRET are correctly configured in .env.local
-- Check that the TTTranscribe service is running and accessible
-- Ensure the service implements /transcribe and /status endpoints

@@ -20,7 +20,8 @@
       "Bash(node test-simple.js:*)",
       "Bash(npm install:*)",
       "Bash(npm info:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

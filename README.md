@@ -26,10 +26,14 @@ TTTranscribe is a production-ready TikTok transcription service that provides st
 - **🚀 Fast API**: Accepts transcription requests and returns immediately with a request ID
 - **📊 Status Tracking**: Real-time status updates with phase progression
 - **🎵 TikTok Support**: Handles TikTok URLs with redirect resolution and audio extraction
-- **🤖 ASR Integration**: Uses Hugging Face Whisper API for high-quality transcription
+- **🤖 Local Whisper**: Uses openai-whisper for reliable, offline transcription (with HF API fallback)
 - **📝 Structured Logging**: Consistent log format for monitoring and debugging
 - **🌍 Environment Adaptive**: Automatically detects and adapts to local vs. Hugging Face Spaces
 - **💪 Production Ready**: Comprehensive error handling, fallbacks, and resilience
+- **💰 Monetization Ready**: Webhook callbacks, usage metering, and cost estimation for credit-based billing
+- **🔒 HMAC Signatures**: Secure webhook verification with timing-safe comparison
+- **🔄 Idempotency**: Prevents duplicate charges with built-in idempotency key system
+- **📈 Usage Metrics**: Accurate audio duration extraction, character count, and model tracking
 
 ## API Endpoints
 
@@ -119,16 +123,85 @@ curl -H "X-Engine-Auth: hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU
      https://your-space-url.hf.space/status/<job_id>
    ```
 
+## Monetization & Webhook System
+
+TTTranscribe includes a complete webhook system for credit-based monetization:
+
+### Webhook Configuration
+
+Set these environment variables to enable webhook callbacks to Business Engine:
+
+```bash
+BUSINESS_ENGINE_WEBHOOK_URL=https://your-business-engine.com/webhooks/tttranscribe
+BUSINESS_ENGINE_WEBHOOK_SECRET=your-shared-secret
+```
+
+### Webhook Payload
+
+When a transcription completes or fails, TTTranscribe sends:
+
+```json
+{
+  "jobId": "ttt-uuid",
+  "requestId": "business-engine-uuid",
+  "status": "completed",
+  "usage": {
+    "audioDurationSeconds": 45.23,
+    "transcriptCharacters": 1937,
+    "modelUsed": "openai-whisper-base",
+    "processingTimeSeconds": 12
+  },
+  "timestamp": "2025-11-29T21:44:30.000Z",
+  "idempotencyKey": "sha256-hash",
+  "signature": "hmac-sha256-signature"
+}
+```
+
+### Security Features
+
+- **HMAC Signatures**: All webhooks include HMAC-SHA256 signature for verification
+- **Idempotency Keys**: Prevents duplicate charges if webhook is retried
+- **Retry Logic**: Up to 5 retries with exponential backoff (1s, 2s, 4s, 8s, 16s)
+- **Timing-Safe Comparison**: Prevents timing attacks on signature verification
+
+### Cost Estimation
+
+Estimate transcription cost before submitting:
+
+```bash
+curl -H "X-Engine-Auth: your-secret" \
+  -d '{"url":"https://www.tiktok.com/@user/video/123"}' \
+  -H "content-type: application/json" \
+  https://your-space.hf.space/estimate
+```
+
+Returns: `{"estimatedCredits": 1, "estimatedDurationSeconds": 45, "modelUsed": "openai-whisper-base"}`
+
+**📚 Full Integration Guide**: See [WHAT_TTTRANSCRIBE_EXPECTSFROM_BUSINESSENGINE.md](./WHAT_TTTRANSCRIBE_EXPECTSFROM_BUSINESSENGINE.md) for complete webhook implementation details.
+
 ## Environment Variables
 
 Configure the service using these environment variables:
 
+### Core Settings
 - `ENGINE_SHARED_SECRET`: Authentication secret for API access (default: protocol-compliant value)
-- `HF_API_KEY`: Hugging Face API key for transcription
+- `HF_API_KEY`: Hugging Face API key for transcription fallback (optional with local whisper)
 - `ASR_PROVIDER`: ASR provider (default: "hf")
 - `TMP_DIR`: Temporary directory for audio files (default: platform-aware)
 - `KEEP_TEXT_MAX`: Maximum text length (default: 10000)
 - `ALLOW_PLACEHOLDER_TRANSCRIPTION`: If `true`, returns placeholder text when `HF_API_KEY` is missing (default: true in local/dev)
+
+### Whisper Configuration
+- `PREFER_LOCAL_WHISPER`: Use local openai-whisper instead of HF API (default: "true")
+- `WHISPER_MODEL_SIZE`: Whisper model size - tiny/base/small/medium/large (default: "base")
+
+### Webhook Settings
+- `BUSINESS_ENGINE_WEBHOOK_URL`: URL to send completion/failure webhooks
+- `BUSINESS_ENGINE_WEBHOOK_SECRET`: Secret for HMAC signature generation (defaults to ENGINE_SHARED_SECRET)
+- `WEBHOOK_MAX_RETRIES`: Maximum webhook retry attempts (default: 5)
+- `WEBHOOK_INITIAL_BACKOFF_MS`: Initial retry backoff in milliseconds (default: 1000)
+- `WEBHOOK_MAX_BACKOFF_MS`: Maximum retry backoff in milliseconds (default: 30000)
+- `WEBHOOK_TIMEOUT_MS`: Webhook request timeout in milliseconds (default: 10000)
 
 ## Caching
 

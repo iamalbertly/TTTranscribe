@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import { transcribe } from './TTTranscribe-ASR-Whisper-Transcription';
 import { summarize } from './TTTranscribe-AI-Text-Summarization';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
+import { sendWebhookToBusinessEngine, calculateUsage } from './TTTranscribe-Webhook-Business-Engine';
+import { getAudioDuration, getModelUsed } from './TTTranscribe-Audio-Utils';
 
 // Fixed status phases as per requirements
 export type StatusPhase =
@@ -50,7 +52,8 @@ export type Status = {
 
 // Job record for persistence
 export type JobRecord = {
-  requestId: string;
+  requestId: string; // TTTranscribe job ID (UUID)
+  businessEngineRequestId?: string; // Original request ID from Business Engine (for webhook callback)
   url: string;
   phase: StatusPhase;
   percent: number;
@@ -238,7 +241,7 @@ function truncateTextIfNeeded(text: string, maxLength: number): { text: string; 
   };
 }
 
-export async function startJob(url: string): Promise<string> {
+export async function startJob(url: string, businessEngineRequestId?: string): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -251,6 +254,7 @@ export async function startJob(url: string): Promise<string> {
     // Create job record for cached result
     const jobRecord: JobRecord = {
       requestId: id,
+      businessEngineRequestId,
       url,
       phase: 'COMPLETED',
       percent: 100,
@@ -263,6 +267,27 @@ export async function startJob(url: string): Promise<string> {
 
     // Return cached result immediately
     updateStatus(id, 'COMPLETED', 100, 'Retrieved from cache', cached.result.transcription, false, cached.result, cached.metadata);
+
+    // Send webhook for cached result if Business Engine request ID is provided
+    if (businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+      const usage = calculateUsage(
+        cached.result.duration || 0,
+        cached.result.transcription || '',
+        getModelUsed(),
+        Date.now()
+      );
+
+      sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+        jobId: id,
+        requestId: businessEngineRequestId,
+        status: 'completed',
+        usage,
+        timestamp: now,
+      }).catch(err => {
+        console.error(`[webhook] Failed to send webhook for cached result ${id}: ${err.message}`);
+      });
+    }
+
     return id;
   }
 
@@ -271,6 +296,7 @@ export async function startJob(url: string): Promise<string> {
   // Create job record
   const jobRecord: JobRecord = {
     requestId: id,
+    businessEngineRequestId,
     url,
     phase: 'REQUEST_SUBMITTED',
     percent: 0,
@@ -301,6 +327,22 @@ export async function startJob(url: string): Promise<string> {
         const errMsg = downloadError.message || String(downloadError);
         console.error(`Download failed for ${id}: ${errMsg}`);
         updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 300)}`);
+
+        // Send failure webhook to Business Engine
+        if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+          const usage = calculateUsage(0, '', getModelUsed(), startTime);
+          sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+            jobId: id,
+            requestId: jobRecord.businessEngineRequestId,
+            status: 'failed',
+            usage,
+            error: `Download failed: ${errMsg.substring(0, 200)}`,
+            timestamp: new Date().toISOString(),
+          }).catch(err => {
+            console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
+          });
+        }
+
         return; // Exit early on download failure
       }
 
@@ -318,6 +360,23 @@ export async function startJob(url: string): Promise<string> {
           console.error(`Transcription returned error/placeholder for ${id}: ${messagePreview}`);
           // Mark job as FAILED and include the transcription error in the note. Do NOT cache placeholder or failed results.
           updateStatus(id, 'FAILED', 0, `Transcription failed: ${messagePreview}`);
+
+          // Send failure webhook to Business Engine
+          if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+            const audioDuration = await getAudioDuration(wavPath).catch(() => 0);
+            const usage = calculateUsage(audioDuration, '', getModelUsed(), startTime);
+            sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+              jobId: id,
+              requestId: jobRecord.businessEngineRequestId,
+              status: 'failed',
+              usage,
+              error: `Transcription failed: ${messagePreview}`,
+              timestamp: new Date().toISOString(),
+            }).catch(err => {
+              console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
+            });
+          }
+
           // Clean up temp file if needed - best-effort
           try { await fs.promises.unlink(wavPath); } catch {}
           return; // End processing for this job early
@@ -328,6 +387,23 @@ export async function startJob(url: string): Promise<string> {
         console.error(`Transcription error for ${id}: ${errMsg}`);
         console.error(`Stack trace: ${errStack.substring(0, 500)}`);
         updateStatus(id, 'FAILED', 0, `Transcription error: ${errMsg.substring(0, 300)}`);
+
+        // Send failure webhook to Business Engine
+        if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+          const audioDuration = await getAudioDuration(wavPath).catch(() => 0);
+          const usage = calculateUsage(audioDuration, '', getModelUsed(), startTime);
+          sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+            jobId: id,
+            requestId: jobRecord.businessEngineRequestId,
+            status: 'failed',
+            usage,
+            error: `Transcription error: ${errMsg.substring(0, 200)}`,
+            timestamp: new Date().toISOString(),
+          }).catch(err => {
+            console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
+          });
+        }
+
         try { await fs.promises.unlink(wavPath); } catch {}
         return; // Exit early instead of re-throwing
       }
@@ -342,11 +418,14 @@ export async function startJob(url: string): Promise<string> {
       const summary = await summarize(text);
 
       // Phase 4: Completed
+      // Extract audio duration from WAV file
+      const audioDuration = await getAudioDuration(wavPath);
+
       const result = {
         transcription: text,
         confidence: 0.95,
         language: 'en',
-        duration: 30.5, // TODO: Extract from audio metadata
+        duration: audioDuration,
         speakerCount: 1,
         audioQuality: 'high',
         processingTime: Math.round((Date.now() - startTime) / 1000)
@@ -368,11 +447,54 @@ export async function startJob(url: string): Promise<string> {
         console.log(`Not caching result for ${url} due to failure/placeholder content.`);
       }
 
+      // Send webhook to Business Engine if configured
+      if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+        const usage = calculateUsage(
+          audioDuration,
+          text,
+          getModelUsed(),
+          startTime
+        );
+
+        sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+          jobId: id,
+          requestId: jobRecord.businessEngineRequestId,
+          status: 'completed',
+          usage,
+          timestamp: new Date().toISOString(),
+        }).catch(err => {
+          console.error(`[webhook] Failed to send completion webhook for ${id}: ${err.message}`);
+        });
+      }
+
+      // Clean up WAV file
+      try {
+        await fs.promises.unlink(wavPath);
+        console.log(`[cleanup] Deleted WAV file: ${wavPath}`);
+      } catch (cleanupError) {
+        console.warn(`[cleanup] Failed to delete WAV file ${wavPath}: ${cleanupError}`);
+      }
+
     } catch (e: any) {
       const errorMsg = e.message || String(e);
       const phase = jobRecord?.phase || 'UNKNOWN';
       console.log(`ttt:error req=${id} phase=${phase} msg=${errorMsg.substring(0, 150)}`);
       updateStatus(id, 'FAILED', 0, `Error during ${phase}: ${errorMsg.substring(0, 200)}`);
+
+      // Send failure webhook to Business Engine
+      if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+        const usage = calculateUsage(0, '', getModelUsed(), startTime);
+        sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+          jobId: id,
+          requestId: jobRecord.businessEngineRequestId,
+          status: 'failed',
+          usage,
+          error: `Error during ${phase}: ${errorMsg.substring(0, 200)}`,
+          timestamp: new Date().toISOString(),
+        }).catch(err => {
+          console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
+        });
+      }
     }
   })();
 
