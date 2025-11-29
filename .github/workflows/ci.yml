@@ -33,11 +33,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
-            echo "Found requirements.txt - installing and running pytest"
-            pip install -r requirements.txt -r requirements.dev.txt
-            pytest -q
+            echo "Found requirements.txt - installing dependencies"
+            pip install -r requirements.txt
+            # Only install dev dependencies if the file exists
+            if [ -f requirements.dev.txt ]; then
+              pip install -r requirements.dev.txt
+              pytest -q
+            else
+              echo "No requirements.dev.txt found - skipping pytest"
+            fi
           else
-            echo "No requirements.txt found - skipping Python test steps"
+            echo "No requirements.txt found - skipping Python steps"
           fi
       - name: Upload migrations
         if: github.ref == 'refs/heads/main'

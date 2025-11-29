@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/TTTranscribe-Server-Main-Entry.js",
+  "start": "bash start.sh",
     "dev": "ts-node src/TTTranscribe-Server-Main-Entry.ts",
     "test": "node test-api.js",
     "test:contract": "node test-contract.js",

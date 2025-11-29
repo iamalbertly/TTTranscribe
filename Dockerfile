@@ -10,15 +10,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp for TikTok audio download using virtual environment
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install yt-dlp
-
 WORKDIR /app
 
-# Copy package files
+# Copy package files and requirements
 COPY package*.json ./
+COPY requirements.txt ./
+COPY apt.txt ./
+
+# Install yt-dlp using virtual environment for cleaner dependency management
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Node.js dependencies (including dev dependencies for build)
 RUN npm ci

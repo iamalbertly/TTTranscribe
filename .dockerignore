@@ -30,9 +30,9 @@ test-*
 *.test.ts
 tests/
 
-# Python files (legacy)
+# Python files (legacy - but keep requirements.txt for yt-dlp)
 *.py
-requirements*.txt
+# requirements*.txt  # COMMENTED OUT - we need requirements.txt for yt-dlp
 constraints*.txt
 
 # Scripts
