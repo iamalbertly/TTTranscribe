@@ -322,10 +322,12 @@ export async function startJob(url: string): Promise<string> {
         }
       } catch (transcribeError: any) {
         const errMsg = transcribeError.message || String(transcribeError);
+        const errStack = transcribeError.stack || '';
         console.error(`Transcription error for ${id}: ${errMsg}`);
-        updateStatus(id, 'FAILED', 0, `Transcription failed: ${errMsg.substring(0, 200)}`);
+        console.error(`Stack trace: ${errStack.substring(0, 500)}`);
+        updateStatus(id, 'FAILED', 0, `Transcription error: ${errMsg.substring(0, 300)}`);
         try { await fs.promises.unlink(wavPath); } catch {}
-        throw transcribeError; // Re-throw to be caught by outer catch
+        return; // Exit early instead of re-throwing
       }
 
       // Apply text truncation if needed
