@@ -58,10 +58,18 @@ export async function transcribe(wavPath: string): Promise<string> {
       return `[PLACEHOLDER TRANSCRIPTION] This is a placeholder transcription for development purposes. Set HF_API_KEY to enable real transcription.`;
     }
 
-    const model = process.env.ASR_MODEL || 'openai/whisper-large-v3';
+    // Prefer an explicit model via ASR_MODEL env; fall back to a prioritized list of supported models.
+    // NOTE: openai/whisper-large-v3 is known to be deprecated; prefer v2 or other supported ids.
+    const configuredModel = (process.env.ASR_MODEL || '').trim();
+    const preferredModels = configuredModel ? [configuredModel] : [
+      'openai/whisper-large-v2',
+      'openai/whisper-large',
+      'openai/whisper-medium',
+      'openai/whisper-small'
+    ];
 
-    // Build endpoint list: env-specified HF_API_URLS first, then default inference endpoint
-    const endpointFormats = HF_API_URLS.length > 0 ? HF_API_URLS : [`https://api-inference.huggingface.co/models/${model}`];
+    // Build endpoint list: env-specified HF_API_URLS first, then construct from preferredModels
+    const endpointFormats = HF_API_URLS.length > 0 ? HF_API_URLS : preferredModels.map(m => `https://api-inference.huggingface.co/models/${m}`);
 
     if (!HF_API_KEY) {
       // If API key is missing allow placeholder behavior controlled by env var
@@ -132,8 +140,10 @@ export async function transcribe(wavPath: string): Promise<string> {
         // Handle 410 error (deprecated endpoint) - check if response is HTML (error page) or JSON (might still work)
         if (response.status === 410) {
           const contentType = response.headers.get('content-type') || '';
-          if (contentType.includes('text/html')) {
-            console.warn(`Endpoint ${apiUrl} returned 410 with HTML (fully deprecated), trying next format...`);
+          const responseBody = await response.clone().text();
+          const snippet = responseBody.substring(0, 200);
+          if (contentType.includes('text/html') || snippet.trim().startsWith('<!') || snippet.includes('<html')) {
+            console.warn(`Endpoint ${apiUrl} returned 410 with HTML (fully deprecated). Snippet: ${snippet}`);
             lastError = new Error(`Endpoint deprecated: ${apiUrl}`);
             continue;
           } else {
@@ -207,10 +217,28 @@ export async function transcribe(wavPath: string): Promise<string> {
       }
     }
     
-    // If all endpoints failed, throw the last error
+    // If all endpoints failed, attempt local transcription fallback before throwing
     if (!response || !response.ok) {
       const errorText = response ? await response.text() : 'No response';
       const truncatedError = errorText.length > 500 ? errorText.substring(0, 500) + '...' : errorText;
+      
+      // Attempt local transcription as fallback (if configured and available)
+      try {
+        const allowLocalFallback = (process.env.ASR_FALLBACK_TO_LOCAL || 'true').toLowerCase() === 'true';
+        if (allowLocalFallback) {
+          console.log('All HF endpoints failed; attempting local transcription fallback...');
+          try {
+            const localText = await transcribeLocal(wavPath);
+            console.log('Local transcription succeeded as fallback');
+            return localText;
+          } catch (localErr: any) {
+            console.warn(`Local transcription fallback failed: ${localErr?.message || localErr}`);
+          }
+        }
+      } catch (fallbackErr) {
+        console.warn(`Error attempting local fallback: ${fallbackErr}`);
+      }
+
       throw lastError || new Error(`ASR API error: All endpoints failed. Last error: ${truncatedError}`);
     }
     
@@ -266,9 +294,10 @@ export async function transcribe(wavPath: string): Promise<string> {
     return text;
     
   } catch (error) {
-    // If transcription fails, return a helpful message
+    // If transcription fails, return a helpful error message (do NOT include sensitive values like tokens)
     console.warn(`Transcription failed: ${error}`);
-    return `[Transcription failed: ${error}. This may be due to Hugging Face Spaces file system restrictions.]`;
+    const msg = error instanceof Error ? error.message : String(error);
+    return `[Transcription failed: ${msg}.]`;
   }
 }
 
