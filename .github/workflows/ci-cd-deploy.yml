@@ -1,0 +1,85 @@
+name: CI/CD Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install system deps (git-lfs)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs
+          git lfs install
+
+      - name: Install Hugging Face CLI (huggingface_hub)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade huggingface-hub
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Authenticate with Hugging Face
+        env:
+          HF_API_KEY: ${{ secrets.HF_API_KEY }}
+        run: |
+          if [ -z "$HF_API_KEY" ]; then echo "HF_API_KEY secret not set"; exit 1; fi
+          echo "$HF_API_KEY" | hf login --token || python -c "from huggingface_hub import login; import os; login(token=os.environ['HF_API_KEY'])"
+          hf whoami || true
+
+      - name: Push to Hugging Face Space: TTTranscribe
+        env:
+          HF_API_KEY: ${{ secrets.HF_API_KEY }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Add HF remote and push. Use token in URL for authentication.
+          git remote remove hf || true
+          git remote add hf "https://$HF_API_KEY@huggingface.co/spaces/iamromeoly/TTTranscribe.git"
+          git push hf HEAD:main --force
+
+      - name: Push to Hugging Face Space: TTTranscibe (alternate)
+        env:
+          HF_API_KEY: ${{ secrets.HF_API_KEY }}
+        run: |
+          git remote remove hf2 || true
+          git remote add hf2 "https://$HF_API_KEY@huggingface.co/spaces/iamromeoly/TTTranscibe.git"
+          git push hf2 HEAD:main --force || echo "Push to TTTranscibe failed (space may not exist)"
+
+      - name: Mirror to GitHub repo iamalbertly/TTTranscibe (optional)
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_PAT" ]; then echo "GH_PAT not set - skipping GitHub mirror push"; exit 0; fi
+          git remote remove mirror || true
+          git remote add mirror "https://$GH_PAT@github.com/iamalbertly/TTTranscibe.git"
+          # Try pushing; if repo doesn't exist attempt to create it via the GitHub API
+          if git push mirror HEAD:main --force; then
+            echo "Pushed to mirror successfully"
+          else
+            echo "Mirror push failed; attempting to create repository via GitHub API"
+            curl -s -H "Authorization: token $GH_PAT" https://api.github.com/user/repos -d '{"name":"TTTranscibe","private":false}'
+            git push mirror HEAD:main --force || echo "Failed to push to mirror after create"
+          fi

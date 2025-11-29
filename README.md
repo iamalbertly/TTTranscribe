@@ -285,6 +285,41 @@ docker build -t tttranscribe .
 docker run -p 8788:8788 tttranscribe
 ```
 
+## CI / Deployment (GitHub Actions)
+
+This repository contains a GitHub Actions workflow at `.github/workflows/ci-cd-deploy.yml` that builds the project and deploys it to Hugging Face Spaces. The workflow will:
+
+- Install Node.js and Python
+- Install `git-lfs` and the Hugging Face CLI (via the `huggingface-hub` Python package)
+- Build the TypeScript project (`npm run build`)
+- Authenticate to Hugging Face using the `HF_API_KEY` secret
+- Push the repository to the Hugging Face Space at `https://huggingface.co/spaces/iamromeoly/TTTranscribe` (this triggers a rebuild on Spaces)
+- Attempt to push to `https://huggingface.co/spaces/iamromeoly/TTTranscibe` as well (if it exists)
+- Optionally mirror the repo to `https://github.com/iamalbertly/TTTranscibe` when a GitHub Personal Access Token (`GH_PAT`) secret is provided; the workflow will try to create the repo via API if missing.
+
+Required GitHub Secrets (set these in your repository or organization secrets):
+
+- `HF_API_KEY` - Hugging Face token with repo/write permissions (used for pushing to Spaces)
+- `GH_PAT` - (optional) GitHub Personal Access Token with `repo` scope if you want the workflow to push/create the GitHub mirror repository.
+
+Local testing notes
+
+To test the Hugging Face CLI locally (Windows PowerShell):
+
+```powershell
+python -m pip install --upgrade pip
+pip install --upgrade huggingface-hub
+# Login with your token (interactive or direct):
+hf login --token
+hf whoami
+```
+
+If `hf` is not available on your system, the workflow will install `huggingface-hub` in the CI runner and authenticate using the `HF_API_KEY` secret.
+
+Security
+
+Ensure `HF_API_KEY` and `GH_PAT` are stored as encrypted repository secrets and never committed into source control.
+
 ## License
 
 Apache 2.0
