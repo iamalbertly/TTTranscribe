@@ -20,9 +20,14 @@ export async function transcribe(wavPath: string): Promise<string> {
   // Try using the modern HF Inference client first (handles new API)
   if (HF_API_KEY) {
     try {
-      return await transcribeWithHfClient(wavPath);
+      console.log('Attempting transcription with HF Inference Client...');
+      const result = await transcribeWithHfClient(wavPath);
+      console.log('HF Inference Client succeeded!');
+      return result;
     } catch (clientError: any) {
-      console.warn(`HF Inference client failed, falling back to direct API: ${clientError.message}`);
+      console.error(`HF Inference client failed: ${clientError.message}`);
+      console.error(`Error stack: ${clientError.stack}`);
+      console.warn('Falling back to legacy direct API approach...');
       // Fall through to legacy API approach
     }
   }

@@ -19,7 +19,8 @@
       "Bash(git fetch:*)",
       "Bash(node test-simple.js:*)",
       "Bash(npm install:*)",
-      "Bash(npm info:*)"
+      "Bash(npm info:*)",
+      "Bash(node -e:*)"
     ],
     "deny": [],
     "ask": []
