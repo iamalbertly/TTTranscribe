@@ -21,6 +21,7 @@ export type Status = {
   completedAt?: string;
   estimatedCompletion?: string;
   currentStep?: string;
+  error?: string; // Error message when status is 'failed'
   result?: {
     transcription: string;
     confidence: number;
@@ -194,6 +195,7 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
     completedAt: phase === 'COMPLETED' ? now : undefined,
     estimatedCompletion,
     currentStep: mapPhaseToCurrentStep(phase),
+    error: phase === 'FAILED' ? note : undefined, // Include error message when failed
     result: phase === 'COMPLETED' && result ? {
       transcription: text || '',
       confidence: result.confidence || 0.95,
