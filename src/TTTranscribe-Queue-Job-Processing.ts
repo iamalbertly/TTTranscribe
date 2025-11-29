@@ -307,14 +307,16 @@ export async function startJob(url: string): Promise<string> {
           const messagePreview = normalized.substring(0, 200);
           console.error(`Transcription returned error/placeholder for ${id}: ${messagePreview}`);
           // Mark job as FAILED and include the transcription error in the note. Do NOT cache placeholder or failed results.
-          updateStatus(id, 'FAILED', 0, messagePreview);
+          updateStatus(id, 'FAILED', 0, `Transcription failed: ${messagePreview}`);
           // Clean up temp file if needed - best-effort
           try { await fs.promises.unlink(wavPath); } catch {}
           return; // End processing for this job early
         }
       } catch (transcribeError: any) {
-        console.error(`Transcription error for ${id}: ${transcribeError.message}`);
-        updateStatus(id, 'FAILED', 0, `Transcription failed: ${transcribeError.message}`);
+        const errMsg = transcribeError.message || String(transcribeError);
+        console.error(`Transcription error for ${id}: ${errMsg}`);
+        updateStatus(id, 'FAILED', 0, `Transcription failed: ${errMsg.substring(0, 200)}`);
+        try { await fs.promises.unlink(wavPath); } catch {}
         throw transcribeError; // Re-throw to be caught by outer catch
       }
 
@@ -355,8 +357,10 @@ export async function startJob(url: string): Promise<string> {
       }
 
     } catch (e: any) {
-      console.log(`ttt:error req=${id} where=job msg=${e.message}`);
-      updateStatus(id, 'FAILED', 0, e.message);
+      const errorMsg = e.message || String(e);
+      const phase = jobRecord?.phase || 'UNKNOWN';
+      console.log(`ttt:error req=${id} phase=${phase} msg=${errorMsg.substring(0, 150)}`);
+      updateStatus(id, 'FAILED', 0, `Error during ${phase}: ${errorMsg.substring(0, 200)}`);
     }
   })();
 

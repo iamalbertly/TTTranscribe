@@ -1,24 +1,24 @@
 TTTranscribe Direct API Test (Enhanced)
 =======================================
 Base: https://iamromeoly-tttranscribe.hf.space
-Time: 2025-11-24T12:38:31.760Z
+Test URL: https://vm.tiktok.com/ZMAKpqkpN/
+Time: 2025-11-29T19:53:33.203Z
 
 === Testing /health ===
 Status: 200 OK
 Response: {
   "status": "healthy",
   "version": "1.0.0",
-  "uptime": 1200.110057039,
-  "timestamp": "2025-11-24T12:38:35.801Z",
+  "uptime": 1339.990947703,
+  "timestamp": "2025-11-29T19:53:39.522Z",
   "service": "tttranscribe",
-  "platform": "local",
-  "baseUrl": "http://localhost:8788",
+  "platform": "huggingface-spaces",
+  "baseUrl": "https://iamromeoly-tttranscribe.hf.space",
   "cache": {
-    "size": 1,
-    "hitRate": 0.75,
-    "hitCount": 3,
-    "missCount": 1,
-    "oldestEntry": "2025-11-24T12:19:20.096Z"
+    "size": 0,
+    "hitRate": 0,
+    "hitCount": 0,
+    "missCount": 0
   },
   "environment": {
     "hasAuthSecret": true,
@@ -31,14 +31,46 @@ Response: {
 ✅ Server reports it has an auth secret configured.
 
 === Testing /transcribe WITH X-Engine-Auth ===
-Sending X-Engine-Auth: hf_sU...rW3gU
+Sending X-Engine-Auth header (masked), secretLength=56
+URL: https://iamromeoly-tttranscribe.hf.space/transcribe
+Payload: { url: "https://vm.tiktok.com/ZMAKpqkpN/" }
 Status: 202 Accepted
-Success! Job ID: f7e8a24c-e31d-4416-83a6-d7d1ed8438b6
+Success! Job ID: e5723cd1-5454-4062-a8a8-d6531198611b
+Full response: {
+  "id": "e5723cd1-5454-4062-a8a8-d6531198611b",
+  "status": "queued",
+  "submittedAt": "2025-11-29T19:53:42.769Z",
+  "estimatedProcessingTime": 300,
+  "url": "https://vm.tiktok.com/ZMAKpqkpN/"
+}
 
-=== Polling Status for Job f7e8a24c-e31d-4416-83a6-d7d1ed8438b6 ===
-[1/60] Status: completed (100%) - completed
+=== WAITING FOR TRANSCRIPTION ===
+This can take 30 seconds to several minutes depending on video length and service load.
 
-=== Transcription Result ===
-Text length: 0 chars
+=== Polling Status for Job e5723cd1-5454-4062-a8a8-d6531198611b ===
+[1/120] Status: processing (15%) - audio_extraction
+[2/120] Status: failed (0%) - failed
+❌ Job failed: Unknown error
+Full error response: {
+  "id": "e5723cd1-5454-4062-a8a8-d6531198611b",
+  "status": "failed",
+  "progress": 0,
+  "submittedAt": "2025-11-29T19:53:42.767Z",
+  "currentStep": "failed",
+  "server": {
+    "requestId": "e5723cd1-5454-4062-a8a8-d6531198611b",
+    "phaseStartTime": 1764446022768,
+    "phaseElapsedTime": 2913,
+    "createdAt": "2025-11-29T19:53:42.767Z",
+    "updatedAt": "2025-11-29T19:53:45.681Z"
+  }
+}
 
-Result: SUCCESS
+==================================================
+FINAL RESULT: ❌ FAILED
+==================================================
+
+Diagnostics:
+- Verify TTT_BASE and TTT_SHARED_SECRET are correctly configured in .env.local
+- Check that the TTTranscribe service is running and accessible
+- Ensure the service implements /transcribe and /status endpoints

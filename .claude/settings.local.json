@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(cat:*)",
+      "Bash(pip --version:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfix: Fix CI/CD pipeline and optimize Hugging Face deployment\n\n- Fix CI workflow to handle missing requirements.dev.txt gracefully\n- Update .dockerignore to include requirements.txt (needed for yt-dlp)\n- Optimize Dockerfile to use requirements.txt for Python dependencies\n- Ensure apt.txt is copied to Docker image for system dependencies\n- Update package.json start script to use start.sh for proper initialization\n- Use --no-cache-dir flag to reduce Docker image size\n\nThis fixes the failing CI/CD pipeline and ensures clean deployment to Hugging Face Spaces.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git push:*)",
+      "Bash(gh run list:*)",
+      "Bash(huggingface-cli whoami:*)",
+      "Bash(huggingface-cli repo-info:*)",
+      "Bash(python:*)",
+      "Bash(curl:*)",
+      "Bash(BASE_URL=\"https://iamromeoly-tttranscribe.hf.space\" node:*)",
+      "Bash(git remote add:*)",
+      "Bash(git commit:*)",
+      "Bash(node test-deployment-e2e.js:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

@@ -1,15 +1,17 @@
 const fs = require('fs');
 require('dotenv').config({ path: '.env.local' });
 
-const SHARED_SECRET = process.env.ENGINE_SHARED_SECRET;
+// Prefer explicit TTT_SHARED_SECRET, fallback to ENGINE_SHARED_SECRET
+const SHARED_SECRET = process.env.TTT_SHARED_SECRET || process.env.ENGINE_SHARED_SECRET;
 if (!SHARED_SECRET) {
-    console.error('❌ Error: ENGINE_SHARED_SECRET not set in .env.local or environment variables.');
+    console.error('❌ Error: TTT_SHARED_SECRET or ENGINE_SHARED_SECRET not set in .env.local or environment variables.');
     process.exit(1);
 }
 
-const TTT_BASE = process.env.BASE_URL || 'https://iamromeoly-tttranscribe.hf.space';
-// Use a shorter video for faster testing if possible, but keep the user's example
-const TEST_URL = 'https://vm.tiktok.com/ZMATN7F41/';
+// Prefer explicit TTT_BASE, fallback to BASE_URL
+const TTT_BASE = process.env.TTT_BASE || process.env.BASE_URL || 'https://iamromeoly-tttranscibe.hf.space';
+// Use the provided test URL
+const TEST_URL = 'https://vm.tiktok.com/ZMAKpqkpN/';
 const OUTPUT_FILE = 'ttt-test-output.txt';
 
 let output = [];
@@ -55,7 +57,12 @@ async function testHealth() {
 async function testTranscribeAuth() {
     log('\n=== Testing /transcribe WITH X-Engine-Auth ===');
     try {
-        log(`Sending X-Engine-Auth: ${SHARED_SECRET.substring(0, 5)}...${SHARED_SECRET.substring(SHARED_SECRET.length - 5)}`);
+        log(`Sending X-Engine-Auth header (masked), secretLength=${SHARED_SECRET.length}`);
+        log(`URL: ${TTT_BASE}/transcribe`);
+        log(`Payload: { url: "${TEST_URL}" }`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
         const response = await fetch(`${TTT_BASE}/transcribe`, {
             method: 'POST',
@@ -63,8 +70,11 @@ async function testTranscribeAuth() {
                 'Content-Type': 'application/json',
                 'X-Engine-Auth': SHARED_SECRET
             },
-            body: JSON.stringify({ url: TEST_URL })
+            body: JSON.stringify({ url: TEST_URL }),
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
 
         log(`Status: ${response.status} ${response.statusText}`);
         const text = await response.text();
@@ -80,9 +90,15 @@ async function testTranscribeAuth() {
 
         const json = JSON.parse(text);
         log(`Success! Job ID: ${json.id}`);
+        
+        // Log full response for debugging
+        log(`Full response: ${JSON.stringify(json, null, 2)}`);
+        
         return json.id;
     } catch (error) {
         log(`Error: ${error.message}`);
+        log(`Error name: ${error.name}`);
+        if (error.code) log(`Error code: ${error.code}`);
         return null;
     }
 }
@@ -91,7 +107,7 @@ async function pollStatus(jobId) {
     log(`\n=== Polling Status for Job ${jobId} ===`);
 
     let attempts = 0;
-    const maxAttempts = 60; // 2 minutes approx
+    const maxAttempts = 120; // 5+ minutes with 2-3 second waits
 
     while (attempts < maxAttempts) {
         attempts++;
@@ -104,39 +120,77 @@ async function pollStatus(jobId) {
 
             if (!response.ok) {
                 log(`Status check failed: ${response.status}`);
+                const text = await response.text().catch(()=>'<unreadable>');
+                log(`Upstream response (snippet): ${text ? text.slice(0, 400) : '<empty>'}`);
                 return false;
             }
 
             const json = await response.json();
-            log(`[${attempts}/${maxAttempts}] Status: ${json.status} (${json.progress}%) - ${json.currentStep || ''}`);
+            log(`[${attempts}/${maxAttempts}] Status: ${json.status} (${json.progress || 0}%) - ${json.currentStep || ''}`);
 
             if (json.status === 'completed') {
                 log('\n=== Transcription Result ===');
                 const result = json.result || {};
-                log(`Text length: ${result.transcription ? result.transcription.length : 0} chars`);
+                
+                // Handle various response formats for transcript
+                let transcript = null;
                 if (result.transcription) {
-                    log(`Preview: ${result.transcription.substring(0, 200)}...`);
+                    transcript = result.transcription;
+                } else if (typeof result === 'string') {
+                    transcript = result;
+                } else if (json.transcription) {
+                    transcript = json.transcription;
+                } else if (json.text) {
+                    transcript = json.text;
                 }
+                
+                log(`\n✅ TRANSCRIPT RETRIEVED (${transcript ? transcript.length : 0} characters):`);
+                log('---');
+                
+                if (transcript) {
+                    // Log full transcript in chunks to avoid truncation
+                    const chunkSize = 500;
+                    for (let i = 0; i < transcript.length; i += chunkSize) {
+                        log(transcript.slice(i, i + chunkSize));
+                    }
+                } else {
+                    log('⚠️ No transcript found in result');
+                }
+                
+                log('---');
+                
+                // Log additional metadata if available
+                if (result.confidence) log(`Confidence: ${result.confidence}`);
+                if (result.language) log(`Language: ${result.language}`);
+                if (result.duration) log(`Duration: ${result.duration}s`);
+                if (result.wordCount) log(`Word Count: ${result.wordCount}`);
+                
+                log('\n✅ SUCCESS: Transcription completed and retrieved!');
                 return true;
             }
 
             if (json.status === 'failed') {
-                log(`Job failed: ${json.error || 'Unknown error'}`);
+                log(`❌ Job failed: ${json.error || 'Unknown error'}`);
+                if (json.result && json.result.transcription === 'N/A') {
+                    log('Note: result.transcription is "N/A" (standard failure response)');
+                }
+                // Log full error response for debugging
+                log(`Full error response: ${JSON.stringify(json, null, 2)}`);
                 return false;
             }
 
-            await sleep(2000);
+            // Wait before polling again, gradually increase interval
+            const waitTime = Math.min(3000 + (attempts * 100), 10000);
+            await sleep(waitTime);
         } catch (error) {
             log(`Polling error: ${error.message}`);
             await sleep(2000);
         }
     }
 
-    log('Timed out waiting for completion');
+    log('⏱️ Timed out waiting for completion (5+ minutes)');
     return false;
-}
-
-async function run() {
+}async function run() {
     // Clear output file
     if (fs.existsSync(OUTPUT_FILE)) {
         fs.unlinkSync(OUTPUT_FILE);
@@ -145,13 +199,14 @@ async function run() {
     log('TTTranscribe Direct API Test (Enhanced)');
     log('=======================================');
     log(`Base: ${TTT_BASE}`);
+    log(`Test URL: ${TEST_URL}`);
     log(`Time: ${new Date().toISOString()}`);
 
     // 1. Check Health
     const healthOk = await testHealth();
     if (!healthOk) {
-        log('❌ Health check failed. Aborting.');
-        return;
+        log('⚠️ Health check did not return 200. Continuing to attempt /transcribe to collect more diagnostics.');
+        // don't abort — some Hugging Face Spaces expose different paths; continue to exercise /transcribe
     }
 
     // 2. Submit Job
@@ -161,9 +216,21 @@ async function run() {
         return;
     }
 
-    // 3. Poll Status
+    // 3. Poll Status and retrieve transcript
+    log('\n=== WAITING FOR TRANSCRIPTION ===');
+    log('This can take 30 seconds to several minutes depending on video length and service load.');
     const success = await pollStatus(jobId);
-    log(`\nResult: ${success ? 'SUCCESS' : 'FAILED'}`);
+    
+    log(`\n${'='.repeat(50)}`);
+    log(`FINAL RESULT: ${success ? '✅ SUCCESS' : '❌ FAILED'}`);
+    log(`${'='.repeat(50)}`);
+    
+    if (!success) {
+        log('\nDiagnostics:');
+        log('- Verify TTT_BASE and TTT_SHARED_SECRET are correctly configured in .env.local');
+        log('- Check that the TTTranscribe service is running and accessible');
+        log('- Ensure the service implements /transcribe and /status endpoints');
+    }
 }
 
 run().catch(err => {

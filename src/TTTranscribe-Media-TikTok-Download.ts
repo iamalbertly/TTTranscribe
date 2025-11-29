@@ -98,14 +98,19 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     );
     const isWindows = process.platform === 'win32';
     
-    let ytdlpCommand: string;
+    // Try multiple yt-dlp paths for robustness in Spaces
+    let ytdlpPaths = [];
     if (isHuggingFace) {
-      ytdlpCommand = '/opt/venv/bin/yt-dlp';
+      ytdlpPaths = [
+        '/opt/venv/bin/yt-dlp',
+        '/usr/local/bin/yt-dlp',
+        '/usr/bin/yt-dlp',
+        'yt-dlp'  // last resort - hope it's in PATH
+      ];
     } else if (isWindows) {
-      // On Windows, try yt-dlp first, then fallback to placeholder
-      ytdlpCommand = 'yt-dlp';
+      ytdlpPaths = ['yt-dlp'];
     } else {
-      ytdlpCommand = 'yt-dlp';
+      ytdlpPaths = ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', 'yt-dlp'];
     }
     
     // For local development on Windows, skip yt-dlp and use placeholder
@@ -117,34 +122,44 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
       return;
     }
     
-    const command = `${ytdlpCommand} -x --audio-format wav --output "${outputPath}" "${url}"`;
-    
-    console.log(`Downloading audio from ${url}...`);
-    const { stdout, stderr } = await execAsync(command);
-    
-    if (stderr && !stderr.includes('WARNING')) {
-      console.warn('yt-dlp stderr:', stderr);
+    // Try downloading with each yt-dlp path until one succeeds
+    let lastError: Error | null = null;
+    for (const ytdlpCommand of ytdlpPaths) {
+      try {
+        const command = `${ytdlpCommand} -x --audio-format wav --output "${outputPath}" "${url}"`;
+        console.log(`[download] Attempting yt-dlp download with: ${ytdlpCommand}`);
+        const { stdout, stderr } = await execAsync(command);
+        if (stderr && !stderr.includes('WARNING')) {
+          console.warn('[download] yt-dlp stderr:', stderr.substring(0, 200));
+        }
+        // Success - verify file and return
+        const stats = await fs.promises.stat(outputPath);
+        if (stats.size === 0) {
+          throw new Error('Downloaded file is empty');
+        }
+        console.log(`[download] Successfully downloaded to ${outputPath} (${stats.size} bytes)`);
+        return; // Success, exit function
+      } catch (error: any) {
+        lastError = error;
+        console.warn(`[download] yt-dlp path "${ytdlpCommand}" failed: ${error.message}`);
+        // Continue to next path
+      }
     }
     
-    // Verify the file was created and has content
-    const stats = await fs.stat(outputPath);
-    if (stats.size === 0) {
-      throw new Error('Downloaded file is empty');
-    }
-    
-    console.log(`Successfully downloaded audio to ${outputPath} (${stats.size} bytes)`);
+    // All yt-dlp paths failed
+    throw lastError || new Error('yt-dlp not found in any standard location');
     
   } catch (error) {
     // Fallback to placeholder if yt-dlp fails
-    console.warn(`yt-dlp failed, using placeholder: ${error}`);
+    console.warn(`[download] yt-dlp failed, using placeholder: ${error}`);
     
     try {
       const placeholderContent = `# Placeholder audio file for ${url}\n# Downloaded at ${new Date().toISOString()}\n# yt-dlp failed: ${error}`;
       await fs.writeFile(outputPath, placeholderContent);
-      console.log(`Created fallback placeholder file at ${outputPath}`);
+      console.log(`[download] Created fallback placeholder file at ${outputPath}`);
     } catch (writeError) {
       // If we can't write to the file system, create a virtual file path
-      console.warn(`Cannot write to filesystem, using virtual file: ${writeError}`);
+      console.warn(`[download] Cannot write to filesystem: ${writeError}`);
       // Return the original path even if we can't write - the transcription will handle this
     }
   }
