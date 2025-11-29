@@ -9,7 +9,8 @@ const HF_API_KEY = process.env.HF_API_KEY;
 const ASR_PROVIDER = process.env.ASR_PROVIDER || 'hf';
 // Comma-separated list of HF API endpoints to try (allows migration/fallback)
 const HF_API_URLS = (process.env.HF_API_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
-const ASR_MAX_RETRIES = parseInt(process.env.ASR_MAX_RETRIES || '3');
+const ASR_MAX_RETRIES = parseInt(process.env.ASR_MAX_RETRIES || '2');
+const ASR_TIMEOUT_MS = parseInt(process.env.ASR_TIMEOUT_MS || '60000'); // 60 second default timeout
 
 /**
  * Transcribe audio using Hugging Face Whisper API
@@ -60,15 +61,16 @@ export async function transcribe(wavPath: string): Promise<string> {
 
     // Prefer an explicit model via ASR_MODEL env; fall back to a prioritized list of supported models.
     // NOTE: openai/whisper-* models are deprecated on HF Inference API
-    // Use actively maintained alternatives like distil-whisper or faster-whisper
+    // Prioritize smaller/faster models first to avoid timeouts
     const configuredModel = (process.env.ASR_MODEL || '').trim();
     const preferredModels = configuredModel ? [configuredModel] : [
-      'distil-whisper/distil-large-v3',
-      'Systran/faster-whisper-large-v3',
-      'distil-whisper/distil-large-v2',
-      'openai/whisper-large-v2',  // Keep as fallback even if deprecated
-      'openai/whisper-large',
-      'openai/whisper-medium'
+      'openai/whisper-base',       // Smallest, fastest - good for quick responses
+      'distil-whisper/distil-medium.en',  // Fast English-only model
+      'distil-whisper/distil-large-v2',   // Balanced speed/accuracy
+      'Systran/faster-whisper-medium',    // CTranslate2 optimized medium
+      'distil-whisper/distil-large-v3',   // Larger but still fast
+      'openai/whisper-small',      // Deprecated but might work
+      'openai/whisper-medium'      // Fallback
     ];
 
     // Build endpoint list: env-specified HF_API_URLS first, then construct from preferredModels
@@ -115,14 +117,33 @@ export async function transcribe(wavPath: string): Promise<string> {
             contentType: 'audio/wav'
           });
 
-          response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-              ...(HF_API_KEY ? { 'Authorization': `Bearer ${HF_API_KEY}` } : {}),
-              ...attemptForm.getHeaders()
-            },
-            body: attemptForm
-          });
+          // Create abort controller for timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => {
+            console.log(`Request to ${apiUrl} timed out after ${ASR_TIMEOUT_MS}ms`);
+            controller.abort();
+          }, ASR_TIMEOUT_MS);
+
+          try {
+            response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: {
+                ...(HF_API_KEY ? { 'Authorization': `Bearer ${HF_API_KEY}` } : {}),
+                ...attemptForm.getHeaders()
+              },
+              body: attemptForm,
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+          } catch (fetchError: any) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+              console.warn(`Request to ${apiUrl} was aborted due to timeout (${ASR_TIMEOUT_MS}ms)`);
+              lastError = new Error(`Timeout after ${ASR_TIMEOUT_MS}ms`);
+              break; // Move to next endpoint
+            }
+            throw fetchError; // Re-throw other errors
+          }
 
           // If successful or non-retryable status, break retry loop
           if (response.ok || [404].includes(response.status)) break;
