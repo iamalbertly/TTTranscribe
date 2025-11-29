@@ -16,7 +16,10 @@
       "Bash(git remote add:*)",
       "Bash(git commit:*)",
       "Bash(node test-deployment-e2e.js:*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(node test-simple.js:*)",
+      "Bash(npm install:*)",
+      "Bash(npm info:*)"
     ],
     "deny": [],
     "ask": []

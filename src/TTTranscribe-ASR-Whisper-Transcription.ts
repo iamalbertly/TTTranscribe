@@ -3,6 +3,7 @@ import fetch from 'node-fetch';
 import * as fs from 'fs';
 import * as path from 'path';
 import FormData from 'form-data';
+import { InferenceClient } from '@huggingface/inference';
 
 // Get environment variables with proper fallbacks
 const HF_API_KEY = process.env.HF_API_KEY;
@@ -16,6 +17,62 @@ const ASR_TIMEOUT_MS = parseInt(process.env.ASR_TIMEOUT_MS || '60000'); // 60 se
  * Transcribe audio using Hugging Face Whisper API
  */
 export async function transcribe(wavPath: string): Promise<string> {
+  // Try using the modern HF Inference client first (handles new API)
+  if (HF_API_KEY) {
+    try {
+      return await transcribeWithHfClient(wavPath);
+    } catch (clientError: any) {
+      console.warn(`HF Inference client failed, falling back to direct API: ${clientError.message}`);
+      // Fall through to legacy API approach
+    }
+  }
+
+  // Legacy API approach (likely deprecated but kept as fallback)
+  return await transcribeWithLegacyAPI(wavPath);
+}
+
+/**
+ * Transcribe using the modern @huggingface/inference client
+ */
+async function transcribeWithHfClient(wavPath: string): Promise<string> {
+  const hf = new InferenceClient(HF_API_KEY);
+
+  // Read the audio file as buffer and convert to Blob
+  const audioBuffer = await fs.promises.readFile(wavPath);
+  const audioBlob = new Blob([audioBuffer], { type: 'audio/wav' });
+
+  // Try models in priority order
+  const models = [
+    'openai/whisper-large-v3-turbo',
+    'openai/whisper-large-v3',
+    'distil-whisper/distil-large-v3'
+  ];
+
+  for (const model of models) {
+    try {
+      console.log(`Attempting transcription with HF client using model: ${model}`);
+      const result = await hf.automaticSpeechRecognition({
+        model,
+        data: audioBlob
+      });
+
+      if (result && result.text) {
+        console.log(`Successfully transcribed with ${model}`);
+        return result.text;
+      }
+    } catch (modelError: any) {
+      console.warn(`Model ${model} failed: ${modelError.message}`);
+      continue;
+    }
+  }
+
+  throw new Error('All HF Inference client models failed');
+}
+
+/**
+ * Legacy transcription using direct API calls (deprecated)
+ */
+async function transcribeWithLegacyAPI(wavPath: string): Promise<string> {
   try {
     // Check if file exists and is readable (Hugging Face Spaces might have restrictions)
     try {
