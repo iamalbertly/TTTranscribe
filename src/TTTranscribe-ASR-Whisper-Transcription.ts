@@ -17,22 +17,38 @@ const ASR_TIMEOUT_MS = parseInt(process.env.ASR_TIMEOUT_MS || '60000'); // 60 se
  * Transcribe audio using Hugging Face Whisper API
  */
 export async function transcribe(wavPath: string): Promise<string> {
-  // Try using the modern HF Inference client first (handles new API)
-  if (HF_API_KEY) {
+  // Prefer local Whisper (faster-whisper) for reliability and speed
+  // No API dependency, works offline, free
+  const preferLocal = (process.env.PREFER_LOCAL_WHISPER || 'true').toLowerCase() === 'true';
+
+  if (preferLocal) {
     try {
-      console.log('Attempting transcription with HF Inference Client...');
-      const result = await transcribeWithHfClient(wavPath);
-      console.log('HF Inference Client succeeded!');
+      console.log('[transcribe] Using local faster-whisper (preferred method)');
+      const result = await transcribeLocal(wavPath);
+      console.log('[transcribe] Local whisper succeeded!');
       return result;
-    } catch (clientError: any) {
-      console.error(`HF Inference client failed: ${clientError.message}`);
-      console.error(`Error stack: ${clientError.stack}`);
-      console.warn('Falling back to legacy direct API approach...');
-      // Fall through to legacy API approach
+    } catch (localError: any) {
+      console.error(`[transcribe] Local whisper failed: ${localError.message}`);
+      console.warn('[transcribe] Falling back to HF API...');
+      // Fall through to HF API
     }
   }
 
-  // Legacy API approach (likely deprecated but kept as fallback)
+  // Fallback 1: Try HF Inference Client (if API key available)
+  if (HF_API_KEY) {
+    try {
+      console.log('[transcribe] Attempting transcription with HF Inference Client...');
+      const result = await transcribeWithHfClient(wavPath);
+      console.log('[transcribe] HF Inference Client succeeded!');
+      return result;
+    } catch (clientError: any) {
+      console.error(`[transcribe] HF Inference client failed: ${clientError.message}`);
+      console.warn('[transcribe] Falling back to legacy API...');
+      // Fall through to legacy API
+    }
+  }
+
+  // Fallback 2: Legacy API approach (deprecated, likely won't work)
   return await transcribeWithLegacyAPI(wavPath);
 }
 
@@ -387,12 +403,71 @@ async function transcribeWithLegacyAPI(wavPath: string): Promise<string> {
 }
 
 /**
- * Alternative transcription using local Whisper (if available)
+ * Alternative transcription using local Whisper (faster-whisper)
  */
 export async function transcribeLocal(wavPath: string): Promise<string> {
-  // This would use a local Whisper installation
-  // For now, we'll throw an error indicating it's not implemented
-  throw new Error('Local transcription not implemented - use HF API');
+  const { exec } = require('child_process');
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+
+  try {
+    console.log(`[local-whisper] Transcribing ${wavPath} using faster-whisper...`);
+
+    // Use Python to run faster-whisper transcription
+    // Create a simple Python script inline that uses faster-whisper
+    const pythonScript = `
+import sys
+from faster_whisper import WhisperModel
+
+# Use tiny or base model for speed (can be configured via env)
+model_size = "${process.env.WHISPER_MODEL_SIZE || 'base'}"
+device = "cpu"
+compute_type = "int8"
+
+try:
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    segments, info = model.transcribe("${wavPath.replace(/\\/g, '/')}", beam_size=5)
+
+    # Combine all segments into full transcript
+    transcript = " ".join([segment.text for segment in segments])
+    print(transcript.strip())
+except Exception as e:
+    print(f"ERROR: {str(e)}", file=sys.stderr)
+    sys.exit(1)
+`;
+
+    // Determine Python command (use venv if in HF Spaces)
+    const isHuggingFace = !!(
+      process.env.SPACE_ID ||
+      process.env.HF_SPACE_ID ||
+      process.env.HUGGINGFACE_SPACE_ID
+    );
+
+    const pythonCmd = isHuggingFace ? '/opt/venv/bin/python3' : 'python3';
+
+    // Execute the Python script
+    const { stdout, stderr } = await execAsync(`${pythonCmd} -c '${pythonScript}'`, {
+      timeout: 300000, // 5 minute timeout
+      maxBuffer: 10 * 1024 * 1024 // 10MB buffer
+    });
+
+    if (stderr && stderr.includes('ERROR:')) {
+      throw new Error(`Whisper transcription failed: ${stderr}`);
+    }
+
+    const transcript = stdout.trim();
+
+    if (!transcript || transcript.length === 0) {
+      throw new Error('Whisper returned empty transcript');
+    }
+
+    console.log(`[local-whisper] Successfully transcribed ${transcript.length} characters`);
+    return transcript;
+
+  } catch (error: any) {
+    console.error(`[local-whisper] Failed: ${error.message}`);
+    throw new Error(`Local Whisper transcription failed: ${error.message}`);
+  }
 }
 
 /**

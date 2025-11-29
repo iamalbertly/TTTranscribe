@@ -2,15 +2,15 @@ TTTranscribe Direct API Test (Enhanced)
 =======================================
 Base: https://iamromeoly-tttranscribe.hf.space
 Test URL: https://vm.tiktok.com/ZMAKpqkpN/
-Time: 2025-11-29T20:49:13.650Z
+Time: 2025-11-29T20:54:44.071Z
 
 === Testing /health ===
 Status: 200 OK
 Response: {
   "status": "healthy",
   "version": "1.0.0",
-  "uptime": 180.351892135,
-  "timestamp": "2025-11-29T20:49:20.122Z",
+  "uptime": 176.581554553,
+  "timestamp": "2025-11-29T20:54:49.869Z",
   "service": "tttranscribe",
   "platform": "huggingface-spaces",
   "baseUrl": "https://iamromeoly-tttranscribe.hf.space",
@@ -35,11 +35,11 @@ Sending X-Engine-Auth header (masked), secretLength=56
 URL: https://iamromeoly-tttranscribe.hf.space/transcribe
 Payload: { url: "https://vm.tiktok.com/ZMAKpqkpN/" }
 Status: 202 Accepted
-Success! Job ID: 865a01a6-33cf-457c-82ba-0031b99c1cb8
+Success! Job ID: 8a79c23c-bb74-402a-833d-de9981e7a9a3
 Full response: {
-  "id": "865a01a6-33cf-457c-82ba-0031b99c1cb8",
+  "id": "8a79c23c-bb74-402a-833d-de9981e7a9a3",
   "status": "queued",
-  "submittedAt": "2025-11-29T20:49:24.847Z",
+  "submittedAt": "2025-11-29T20:54:52.857Z",
   "estimatedProcessingTime": 300,
   "url": "https://vm.tiktok.com/ZMAKpqkpN/"
 }
@@ -47,21 +47,22 @@ Full response: {
 === WAITING FOR TRANSCRIPTION ===
 This can take 30 seconds to several minutes depending on video length and service load.
 
-=== Polling Status for Job 865a01a6-33cf-457c-82ba-0031b99c1cb8 ===
-[1/120] Status: failed (0%) - failed
+=== Polling Status for Job 8a79c23c-bb74-402a-833d-de9981e7a9a3 ===
+[1/120] Status: processing (15%) - audio_extraction
+[2/120] Status: failed (0%) - failed
 ❌ Job failed: Unknown error
 Full error response: {
-  "id": "865a01a6-33cf-457c-82ba-0031b99c1cb8",
+  "id": "8a79c23c-bb74-402a-833d-de9981e7a9a3",
   "status": "failed",
   "progress": 0,
-  "submittedAt": "2025-11-29T20:49:24.846Z",
+  "submittedAt": "2025-11-29T20:54:52.856Z",
   "currentStep": "failed",
   "server": {
-    "requestId": "865a01a6-33cf-457c-82ba-0031b99c1cb8",
-    "phaseStartTime": 1764449364846,
-    "phaseElapsedTime": 1981,
-    "createdAt": "2025-11-29T20:49:24.846Z",
-    "updatedAt": "2025-11-29T20:49:26.827Z"
+    "requestId": "8a79c23c-bb74-402a-833d-de9981e7a9a3",
+    "phaseStartTime": 1764449692856,
+    "phaseElapsedTime": 1941,
+    "createdAt": "2025-11-29T20:54:52.856Z",
+    "updatedAt": "2025-11-29T20:54:54.797Z"
   }
 }
 
