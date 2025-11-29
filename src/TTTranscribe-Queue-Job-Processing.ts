@@ -1,4 +1,5 @@
 import { download } from './TTTranscribe-Media-TikTok-Download';
+import * as fs from 'fs';
 import { transcribe } from './TTTranscribe-ASR-Whisper-Transcription';
 import { summarize } from './TTTranscribe-AI-Text-Summarization';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
@@ -35,6 +36,14 @@ export type Status = {
     author?: string;
     description?: string;
     url: string;
+  };
+  // Server-side debug information included in status for easier client-side reporting
+  server?: {
+    requestId: string;
+    phaseStartTime?: number;
+    phaseElapsedTime?: number;
+    createdAt?: string;
+    updatedAt?: string;
   };
 };
 
@@ -200,7 +209,14 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
       author: metadata.author,
       description: metadata.description,
       url: metadata.url
-    } : undefined
+  } : undefined,
+  server: jobRecord ? {
+      requestId: jobRecord.requestId,
+      phaseStartTime: jobRecord.phaseStartTime,
+      phaseElapsedTime: jobRecord.phaseElapsedTime,
+      createdAt: jobRecord.createdAt,
+      updatedAt: jobRecord.updatedAt
+    } : undefined,
   };
 
   statuses.set(requestId, status);
@@ -285,10 +301,16 @@ export async function startJob(url: string): Promise<string> {
       try {
         rawText = await transcribe(wavPath);
         
-        // Check if transcription failed (error message in result)
-        if (rawText.startsWith('[Transcription failed') || rawText.startsWith('[PLACEHOLDER')) {
-          console.error(`Transcription returned error/placeholder for ${id}: ${rawText.substring(0, 100)}`);
-          // Don't fail the job, but log the issue - the text will be returned to client
+        // Check if transcription failed or returned a placeholder marker
+        const normalized = (rawText || '').toString();
+        if (normalized.startsWith('[Transcription failed') || normalized.startsWith('[PLACEHOLDER') || normalized.includes('Placeholder')) {
+          const messagePreview = normalized.substring(0, 200);
+          console.error(`Transcription returned error/placeholder for ${id}: ${messagePreview}`);
+          // Mark job as FAILED and include the transcription error in the note. Do NOT cache placeholder or failed results.
+          updateStatus(id, 'FAILED', 0, messagePreview);
+          // Clean up temp file if needed - best-effort
+          try { await fs.promises.unlink(wavPath); } catch {}
+          return; // End processing for this job early
         }
       } catch (transcribeError: any) {
         console.error(`Transcription error for ${id}: ${transcribeError.message}`);
@@ -325,8 +347,12 @@ export async function startJob(url: string): Promise<string> {
 
       updateStatus(id, 'COMPLETED', 100, summary, text, truncated, result, metadata);
 
-      // Cache the result for future requests
-      jobResultCache.set(url, result, metadata);
+      // Cache the result for future requests only if transcription did not contain placeholders or failed markers
+      if (text && !text.startsWith('[Transcription failed') && !text.startsWith('[PLACEHOLDER')) {
+        jobResultCache.set(url, result, metadata);
+      } else {
+        console.log(`Not caching result for ${url} due to failure/placeholder content.`);
+      }
 
     } catch (e: any) {
       console.log(`ttt:error req=${id} where=job msg=${e.message}`);

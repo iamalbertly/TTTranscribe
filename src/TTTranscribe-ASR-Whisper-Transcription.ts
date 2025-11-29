@@ -7,6 +7,9 @@ import FormData from 'form-data';
 // Get environment variables with proper fallbacks
 const HF_API_KEY = process.env.HF_API_KEY;
 const ASR_PROVIDER = process.env.ASR_PROVIDER || 'hf';
+// Comma-separated list of HF API endpoints to try (allows migration/fallback)
+const HF_API_URLS = (process.env.HF_API_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+const ASR_MAX_RETRIES = parseInt(process.env.ASR_MAX_RETRIES || '3');
 
 /**
  * Transcribe audio using Hugging Face Whisper API
@@ -55,16 +58,17 @@ export async function transcribe(wavPath: string): Promise<string> {
       return `[PLACEHOLDER TRANSCRIPTION] This is a placeholder transcription for development purposes. Set HF_API_KEY to enable real transcription.`;
     }
 
-    const model = 'openai/whisper-large-v3';
-    
-    // Try multiple endpoint formats with fallback
-    // Note: The inference API endpoint format is: https://api-inference.huggingface.co/models/{model}
-    const endpointFormats = [
-      `https://api-inference.huggingface.co/models/${model}`, // Standard inference API endpoint
-    ];
-    
+    const model = process.env.ASR_MODEL || 'openai/whisper-large-v3';
+
+    // Build endpoint list: env-specified HF_API_URLS first, then default inference endpoint
+    const endpointFormats = HF_API_URLS.length > 0 ? HF_API_URLS : [`https://api-inference.huggingface.co/models/${model}`];
+
     if (!HF_API_KEY) {
-      throw new Error('HF_API_KEY is required for transcription');
+      // If API key is missing allow placeholder behavior controlled by env var
+      const allowPlaceholder = (process.env.ALLOW_PLACEHOLDER_TRANSCRIPTION || 'true').toLowerCase() === 'true';
+      if (!allowPlaceholder) {
+        throw new Error('HF_API_KEY is required for transcription in this environment');
+      }
     }
     
     let lastError: Error | null = null;
@@ -90,14 +94,40 @@ export async function transcribe(wavPath: string): Promise<string> {
           contentType: 'audio/wav'
         });
         
-        response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${HF_API_KEY}`,
-            ...formData.getHeaders()
-          },
-          body: formData
-        });
+        // Add retry loop per endpoint to handle transient errors
+        let attempt = 0;
+        while (attempt < ASR_MAX_RETRIES) {
+          // Re-create form data stream for each attempt
+          const attemptForm = new FormData();
+          attemptForm.append('file', fs.createReadStream(wavPath), {
+            filename: path.basename(wavPath),
+            contentType: 'audio/wav'
+          });
+
+          response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+              ...(HF_API_KEY ? { 'Authorization': `Bearer ${HF_API_KEY}` } : {}),
+              ...attemptForm.getHeaders()
+            },
+            body: attemptForm
+          });
+
+          // If successful or non-retryable status, break retry loop
+          if (response.ok || [404].includes(response.status)) break;
+
+          // If model is loading (503) or server error (5xx), backoff and retry
+          if (response.status === 503 || (response.status >= 500 && response.status < 600)) {
+            const backoffMs = Math.min(10000, 1000 * Math.pow(2, attempt));
+            console.log(`Transient error from ${apiUrl} (status=${response.status}), retrying in ${backoffMs}ms (attempt ${attempt + 1}/${ASR_MAX_RETRIES})`);
+            await new Promise(resolve => setTimeout(resolve, backoffMs));
+            attempt++;
+            continue;
+          }
+
+          // If we reach here, it's not retryable - break and let outer logic handle
+          break;
+        }
         
         // Handle 410 error (deprecated endpoint) - check if response is HTML (error page) or JSON (might still work)
         if (response.status === 410) {
