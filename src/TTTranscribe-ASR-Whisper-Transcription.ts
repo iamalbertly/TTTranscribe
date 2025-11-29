@@ -403,7 +403,7 @@ async function transcribeWithLegacyAPI(wavPath: string): Promise<string> {
 }
 
 /**
- * Alternative transcription using local Whisper (faster-whisper)
+ * Alternative transcription using local Whisper (openai-whisper)
  */
 export async function transcribeLocal(wavPath: string): Promise<string> {
   const { exec } = require('child_process');
@@ -411,26 +411,24 @@ export async function transcribeLocal(wavPath: string): Promise<string> {
   const execAsync = promisify(exec);
 
   try {
-    console.log(`[local-whisper] Transcribing ${wavPath} using faster-whisper...`);
+    console.log(`[local-whisper] Transcribing ${wavPath} using openai-whisper...`);
 
-    // Use Python to run faster-whisper transcription
-    // Create a simple Python script inline that uses faster-whisper
+    // Use Python to run openai-whisper transcription
+    // Create a simple Python script inline that uses whisper
     const pythonScript = `
 import sys
-from faster_whisper import WhisperModel
+import whisper
 
 # Use tiny or base model for speed (can be configured via env)
 model_size = "${process.env.WHISPER_MODEL_SIZE || 'base'}"
-device = "cpu"
-compute_type = "int8"
 
 try:
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
-    segments, info = model.transcribe("${wavPath.replace(/\\/g, '/')}", beam_size=5)
+    model = whisper.load_model(model_size)
+    result = model.transcribe("${wavPath.replace(/\\/g, '/')}")
 
-    # Combine all segments into full transcript
-    transcript = " ".join([segment.text for segment in segments])
-    print(transcript.strip())
+    # Get the transcribed text
+    transcript = result["text"].strip()
+    print(transcript)
 except Exception as e:
     print(f"ERROR: {str(e)}", file=sys.stderr)
     sys.exit(1)
