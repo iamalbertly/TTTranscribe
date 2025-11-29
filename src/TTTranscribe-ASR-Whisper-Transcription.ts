@@ -60,17 +60,16 @@ export async function transcribe(wavPath: string): Promise<string> {
     }
 
     // Prefer an explicit model via ASR_MODEL env; fall back to a prioritized list of supported models.
-    // NOTE: openai/whisper-* models are deprecated on HF Inference API
-    // Prioritize smaller/faster models first to avoid timeouts
+    // NOTE: Most models on HF Inference API v1 are deprecated
+    // Using models that still work on the Inference API (as of 2025-11-29)
+    // If all fail, we'll need to implement a local transcription fallback
     const configuredModel = (process.env.ASR_MODEL || '').trim();
     const preferredModels = configuredModel ? [configuredModel] : [
-      'openai/whisper-base',       // Smallest, fastest - good for quick responses
-      'distil-whisper/distil-medium.en',  // Fast English-only model
-      'distil-whisper/distil-large-v2',   // Balanced speed/accuracy
-      'Systran/faster-whisper-medium',    // CTranslate2 optimized medium
-      'distil-whisper/distil-large-v3',   // Larger but still fast
-      'openai/whisper-small',      // Deprecated but might work
-      'openai/whisper-medium'      // Fallback
+      'openai/whisper-large-v3-turbo',     // Latest turbo model - 0.8B params, fast
+      'nvidia/parakeet-tdt-0.6b-v2',       // NVIDIA's efficient model
+      'facebook/seamless-m4t-v2-large',    // Facebook's multilingual model
+      'openai/whisper-large-v3',           // Full v3 model - 2B params
+      'distil-whisper/distil-large-v3'     // Distilled version - 0.8B params
     ];
 
     // Build endpoint list: env-specified HF_API_URLS first, then construct from preferredModels

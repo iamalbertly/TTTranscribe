@@ -292,7 +292,15 @@ export async function startJob(url: string): Promise<string> {
       // Phase 1: Downloading
       updateStatus(id, 'DOWNLOADING', 15, 'Downloading audio');
 
-      const wavPath = await download(url);
+      let wavPath: string;
+      try {
+        wavPath = await download(url);
+      } catch (downloadError: any) {
+        const errMsg = downloadError.message || String(downloadError);
+        console.error(`Download failed for ${id}: ${errMsg}`);
+        updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 300)}`);
+        return; // Exit early on download failure
+      }
 
       // Phase 2: Transcribing
       updateStatus(id, 'TRANSCRIBING', 35, 'Transcribing audio');

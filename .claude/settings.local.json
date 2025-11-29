@@ -15,7 +15,8 @@
       "Bash(BASE_URL=\"https://iamromeoly-tttranscribe.hf.space\" node:*)",
       "Bash(git remote add:*)",
       "Bash(git commit:*)",
-      "Bash(node test-deployment-e2e.js:*)"
+      "Bash(node test-deployment-e2e.js:*)",
+      "Bash(git fetch:*)"
     ],
     "deny": [],
     "ask": []
