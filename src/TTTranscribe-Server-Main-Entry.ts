@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { startJob, getStatus } from './TTTranscribe-Queue-Job-Processing';
+import { startJob, getStatus, initializeJobProcessing } from './TTTranscribe-Queue-Job-Processing';
 import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 
@@ -338,10 +338,11 @@ app.get('/status/:id', authMiddleware, async (c) => {
  */
 app.get('/health', async (c) => {
   const cacheStats = jobResultCache.getStats();
-  
-  return c.json({ 
+
+  return c.json({
     status: 'healthy',
-    version: '1.0.0',
+    version: config.apiVersion,
+    apiVersion: config.apiVersion,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     service: 'tttranscribe',
@@ -357,6 +358,8 @@ app.get('/health', async (c) => {
     environment: {
       hasAuthSecret: !!config.engineSharedSecret,
       hasHfApiKey: !!config.hfApiKey,
+      hasWebhookUrl: !!config.webhookUrl,
+      hasWebhookSecret: !!config.webhookSecret,
       asrProvider: config.asrProvider,
       port: config.port,
       tmpDir: config.tmpDir
@@ -368,13 +371,27 @@ app.get('/health', async (c) => {
  * Root endpoint
  */
 app.get('/', async (c) => {
-  return c.json({ 
+  const clientVersion = c.req.header('X-Client-Version') || 'unknown';
+  const clientPlatform = c.req.header('X-Client-Platform') || 'unknown';
+
+  return c.json({
     service: 'TTTranscribe',
-    version: '1.0.0',
+    version: config.apiVersion,
+    apiVersion: config.apiVersion,
     platform: config.isHuggingFace ? 'huggingface-spaces' : 'local',
     baseUrl: config.baseUrl,
+    supportedClientVersions: {
+      minimum: '1.0.0',
+      recommended: '1.0.0',
+      latest: '1.0.0'
+    },
+    clientInfo: {
+      detectedVersion: clientVersion,
+      detectedPlatform: clientPlatform
+    },
     endpoints: [
       'POST /transcribe',
+      'POST /estimate',
       'GET /status/:id',
       'GET /health'
     ],
@@ -382,7 +399,24 @@ app.get('/', async (c) => {
       transcribe: {
         method: 'POST',
         url: `${config.baseUrl}/transcribe`,
-        headers: { 'X-Engine-Auth': 'your-secret-key', 'Content-Type': 'application/json' },
+        headers: {
+          'X-Engine-Auth': 'your-secret-key',
+          'Content-Type': 'application/json',
+          'X-Client-Version': '1.0.0',
+          'X-Client-Platform': 'ios|android|web'
+        },
+        body: {
+          url: 'https://vm.tiktok.com/ZMADQVF4e/',
+          requestId: 'business-engine-uuid'
+        }
+      },
+      estimate: {
+        method: 'POST',
+        url: `${config.baseUrl}/estimate`,
+        headers: {
+          'X-Engine-Auth': 'your-secret-key',
+          'Content-Type': 'application/json'
+        },
         body: { url: 'https://vm.tiktok.com/ZMADQVF4e/' }
       },
       status: {
@@ -405,13 +439,16 @@ async function startServer() {
   try {
     // Initialize environment-aware configuration
     config = await initializeConfig();
-    
+
+    // Initialize job processing with configuration
+    initializeJobProcessing(config);
+
     console.log(`🎯 Starting TTTranscribe server on port ${config.port}...`);
     console.log(`🔐 Config loaded: isHuggingFace=${config.isHuggingFace}, isLocal=${config.isLocal}`);
-    
+
     // Set up rate limiting middleware
     app.use('*', rateLimitMiddleware);
-    
+
     console.log(`🔐 Middleware registered with config: isHuggingFace=${config.isHuggingFace}`);
     
     serve({
@@ -429,9 +466,12 @@ async function startServer() {
     console.log(`📋 Configuration:`);
     console.log(`   Platform: ${config.isHuggingFace ? 'Hugging Face Spaces' : 'Local Development'}`);
     console.log(`   Base URL: ${config.baseUrl}`);
+    console.log(`   API Version: ${config.apiVersion}`);
     console.log(`   Auth Secret: ${config.engineSharedSecret ? 'Set' : 'Using default'}`);
     console.log(`   HF API Key: ${config.hfApiKey ? 'Set' : 'Not set'}`);
     console.log(`   ASR Provider: ${config.asrProvider}`);
+    console.log(`   Webhook URL: ${config.webhookUrl}`);
+    console.log(`   Webhook Secret: ${config.webhookSecret ? 'Set' : 'Not set'}`);
     console.log(`   Temp Directory: ${config.tmpDir}`);
     
     // Start cache cleanup interval (every hour)

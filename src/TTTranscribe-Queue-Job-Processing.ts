@@ -5,6 +5,7 @@ import { summarize } from './TTTranscribe-AI-Text-Summarization';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 import { sendWebhookToBusinessEngine, calculateUsage } from './TTTranscribe-Webhook-Business-Engine';
 import { getAudioDuration, getModelUsed } from './TTTranscribe-Audio-Utils';
+import { TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 
 // Fixed status phases as per requirements
 export type StatusPhase =
@@ -67,6 +68,17 @@ export type JobRecord = {
 // In-memory storage (replace with Redis later)
 const statuses = new Map<string, Status>();
 const jobRecords = new Map<string, JobRecord>();
+
+// Configuration reference (set by server on startup)
+let config: TTTranscribeConfig | null = null;
+
+/**
+ * Initialize job processing with configuration
+ */
+export function initializeJobProcessing(appConfig: TTTranscribeConfig): void {
+  config = appConfig;
+  console.log(`[job-processing] Initialized with webhook URL: ${config.webhookUrl}`);
+}
 
 /**
  * Map internal phase to protocol status
@@ -269,7 +281,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
     updateStatus(id, 'COMPLETED', 100, 'Retrieved from cache', cached.result.transcription, false, cached.result, cached.metadata);
 
     // Send webhook for cached result if Business Engine request ID is provided
-    if (businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+    if (businessEngineRequestId && config?.webhookUrl) {
       const usage = calculateUsage(
         cached.result.duration || 0,
         cached.result.transcription || '',
@@ -277,13 +289,13 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         Date.now()
       );
 
-      sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+      sendWebhookToBusinessEngine(config.webhookUrl, {
         jobId: id,
         requestId: businessEngineRequestId,
         status: 'completed',
         usage,
         timestamp: now,
-      }).catch(err => {
+      }, config.webhookSecret).catch(err => {
         console.error(`[webhook] Failed to send webhook for cached result ${id}: ${err.message}`);
       });
     }
@@ -329,16 +341,16 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 300)}`);
 
         // Send failure webhook to Business Engine
-        if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+        if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
           const usage = calculateUsage(0, '', getModelUsed(), startTime);
-          sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+          sendWebhookToBusinessEngine(config.webhookUrl, {
             jobId: id,
             requestId: jobRecord.businessEngineRequestId,
             status: 'failed',
             usage,
             error: `Download failed: ${errMsg.substring(0, 200)}`,
             timestamp: new Date().toISOString(),
-          }).catch(err => {
+          }, config.webhookSecret).catch(err => {
             console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
           });
         }
@@ -362,17 +374,17 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
           updateStatus(id, 'FAILED', 0, `Transcription failed: ${messagePreview}`);
 
           // Send failure webhook to Business Engine
-          if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+          if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
             const audioDuration = await getAudioDuration(wavPath).catch(() => 0);
             const usage = calculateUsage(audioDuration, '', getModelUsed(), startTime);
-            sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+            sendWebhookToBusinessEngine(config.webhookUrl, {
               jobId: id,
               requestId: jobRecord.businessEngineRequestId,
               status: 'failed',
               usage,
               error: `Transcription failed: ${messagePreview}`,
               timestamp: new Date().toISOString(),
-            }).catch(err => {
+            }, config.webhookSecret).catch(err => {
               console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
             });
           }
@@ -389,17 +401,17 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         updateStatus(id, 'FAILED', 0, `Transcription error: ${errMsg.substring(0, 300)}`);
 
         // Send failure webhook to Business Engine
-        if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+        if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
           const audioDuration = await getAudioDuration(wavPath).catch(() => 0);
           const usage = calculateUsage(audioDuration, '', getModelUsed(), startTime);
-          sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+          sendWebhookToBusinessEngine(config.webhookUrl, {
             jobId: id,
             requestId: jobRecord.businessEngineRequestId,
             status: 'failed',
             usage,
             error: `Transcription error: ${errMsg.substring(0, 200)}`,
             timestamp: new Date().toISOString(),
-          }).catch(err => {
+          }, config.webhookSecret).catch(err => {
             console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
           });
         }
@@ -448,7 +460,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       }
 
       // Send webhook to Business Engine if configured
-      if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+      if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
         const usage = calculateUsage(
           audioDuration,
           text,
@@ -456,13 +468,13 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
           startTime
         );
 
-        sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+        sendWebhookToBusinessEngine(config.webhookUrl, {
           jobId: id,
           requestId: jobRecord.businessEngineRequestId,
           status: 'completed',
           usage,
           timestamp: new Date().toISOString(),
-        }).catch(err => {
+        }, config.webhookSecret).catch(err => {
           console.error(`[webhook] Failed to send completion webhook for ${id}: ${err.message}`);
         });
       }
@@ -482,16 +494,16 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       updateStatus(id, 'FAILED', 0, `Error during ${phase}: ${errorMsg.substring(0, 200)}`);
 
       // Send failure webhook to Business Engine
-      if (jobRecord.businessEngineRequestId && process.env.BUSINESS_ENGINE_WEBHOOK_URL) {
+      if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
         const usage = calculateUsage(0, '', getModelUsed(), startTime);
-        sendWebhookToBusinessEngine(process.env.BUSINESS_ENGINE_WEBHOOK_URL, {
+        sendWebhookToBusinessEngine(config.webhookUrl, {
           jobId: id,
           requestId: jobRecord.businessEngineRequestId,
           status: 'failed',
           usage,
           error: `Error during ${phase}: ${errorMsg.substring(0, 200)}`,
           timestamp: new Date().toISOString(),
-        }).catch(err => {
+        }, config.webhookSecret).catch(err => {
           console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
         });
       }

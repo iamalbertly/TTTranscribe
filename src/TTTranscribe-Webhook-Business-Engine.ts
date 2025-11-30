@@ -55,11 +55,12 @@ function generateSignature(payload: Omit<WebhookPayload, 'signature'>, secret: s
  */
 export async function sendWebhookToBusinessEngine(
   webhookUrl: string,
-  payload: Omit<WebhookPayload, 'signature' | 'idempotencyKey'>
+  payload: Omit<WebhookPayload, 'signature' | 'idempotencyKey'>,
+  secret?: string
 ): Promise<boolean> {
-  const secret = process.env.BUSINESS_ENGINE_WEBHOOK_SECRET || process.env.SHARED_SECRET || '';
+  const webhookSecret = secret || process.env.BUSINESS_ENGINE_WEBHOOK_SECRET || process.env.SHARED_SECRET || '';
 
-  if (!secret) {
+  if (!webhookSecret) {
     console.error('[webhook] BUSINESS_ENGINE_WEBHOOK_SECRET not configured, cannot send webhook');
     return false;
   }
@@ -77,7 +78,7 @@ export async function sendWebhookToBusinessEngine(
     signature: '',
   };
 
-  signedPayload.signature = generateSignature(signedPayload, secret);
+  signedPayload.signature = generateSignature(signedPayload, webhookSecret);
 
   console.log(`[webhook] Sending webhook for job ${payload.jobId} to ${webhookUrl}`);
   console.log(`[webhook] Idempotency key: ${idempotencyKey}`);

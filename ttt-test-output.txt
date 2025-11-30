@@ -2,24 +2,23 @@ TTTranscribe Direct API Test (Enhanced)
 =======================================
 Base: https://iamromeoly-tttranscribe.hf.space
 Test URL: https://vm.tiktok.com/ZMAKpqkpN/
-Time: 2025-11-29T21:50:36.355Z
+Time: 2025-11-29T22:58:01.842Z
 
 === Testing /health ===
 Status: 200 OK
 Response: {
   "status": "healthy",
   "version": "1.0.0",
-  "uptime": 466.697452097,
-  "timestamp": "2025-11-29T21:50:43.672Z",
+  "uptime": 162.754445358,
+  "timestamp": "2025-11-29T22:58:09.161Z",
   "service": "tttranscribe",
   "platform": "huggingface-spaces",
   "baseUrl": "https://iamromeoly-tttranscribe.hf.space",
   "cache": {
-    "size": 1,
+    "size": 0,
     "hitRate": 0,
     "hitCount": 0,
-    "missCount": 1,
-    "oldestEntry": "2025-11-29T21:44:47.250Z"
+    "missCount": 0
   },
   "environment": {
     "hasAuthSecret": true,
@@ -36,11 +35,11 @@ Sending X-Engine-Auth header (masked), secretLength=56
 URL: https://iamromeoly-tttranscribe.hf.space/transcribe
 Payload: { url: "https://vm.tiktok.com/ZMAKpqkpN/" }
 Status: 202 Accepted
-Success! Job ID: 335d2787-299b-4d7c-820a-67e904c02710
+Success! Job ID: b8f58bfa-2619-4efc-ba77-62c1f3852160
 Full response: {
-  "id": "335d2787-299b-4d7c-820a-67e904c02710",
+  "id": "b8f58bfa-2619-4efc-ba77-62c1f3852160",
   "status": "queued",
-  "submittedAt": "2025-11-29T21:50:47.253Z",
+  "submittedAt": "2025-11-29T22:58:12.358Z",
   "estimatedProcessingTime": 300,
   "url": "https://vm.tiktok.com/ZMAKpqkpN/"
 }
@@ -48,8 +47,12 @@ Full response: {
 === WAITING FOR TRANSCRIPTION ===
 This can take 30 seconds to several minutes depending on video length and service load.
 
-=== Polling Status for Job 335d2787-299b-4d7c-820a-67e904c02710 ===
-[1/120] Status: completed (100%) - completed
+=== Polling Status for Job b8f58bfa-2619-4efc-ba77-62c1f3852160 ===
+[1/120] Status: processing (15%) - audio_extraction
+[2/120] Status: processing (35%) - transcription
+[3/120] Status: processing (35%) - transcription
+[4/120] Status: processing (35%) - transcription
+[5/120] Status: completed (100%) - completed
 
 === Transcription Result ===
 
@@ -62,7 +65,7 @@ win and scale as a startup. So from the previous step in which you defined a lot
 ---
 Confidence: 0.95
 Language: en
-Duration: 30.5s
+Duration: 95.3s
 Word Count: 362
 
 ✅ SUCCESS: Transcription completed and retrieved!
