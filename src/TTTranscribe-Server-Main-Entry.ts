@@ -162,11 +162,9 @@ async function rateLimitMiddleware(c: any, next: any) {
 }
 
 /**
- * POST /transcribe
- * Accepts a TikTok URL and starts transcription job
- * Returns: { request_id, status: "accepted" }
+ * Core transcribe handler (reused for compatibility routes)
  */
-app.post('/transcribe', authMiddleware, async (c) => {
+async function handleTranscribe(c: any) {
   try {
     let body;
     try {
@@ -228,15 +226,22 @@ app.post('/transcribe', authMiddleware, async (c) => {
       details: { reason: 'internal_error' }
     }, 500);
   }
-});
+}
 
 /**
- * POST /estimate
- * Estimate cost for transcribing a video before submitting
- * Body: { url: string }
- * Returns: { estimatedCost, estimatedDuration, modelUsed }
+ * POST /transcribe
+ * Accepts a TikTok URL and starts transcription job
+ * Returns: { request_id, status: "accepted" }
  */
-app.post('/estimate', authMiddleware, async (c) => {
+app.post('/transcribe', authMiddleware, handleTranscribe);
+
+// Compatibility alias for Business Engine
+app.post('/ttt/transcribe', authMiddleware, handleTranscribe);
+
+/**
+ * Core estimate handler (reused for compatibility routes)
+ */
+async function handleEstimate(c: any) {
   try {
     let body;
     try {
@@ -290,14 +295,23 @@ app.post('/estimate', authMiddleware, async (c) => {
       details: { reason: 'internal_error' }
     }, 500);
   }
-});
+}
 
 /**
- * GET /status/:id
- * Returns job status and progress
- * Returns: { phase, percent, note, text? }
+ * POST /estimate
+ * Estimate cost for transcribing a video before submitting
+ * Body: { url: string }
+ * Returns: { estimatedCost, estimatedDuration, modelUsed }
  */
-app.get('/status/:id', authMiddleware, async (c) => {
+app.post('/estimate', authMiddleware, handleEstimate);
+
+// Compatibility alias for Business Engine
+app.post('/ttt/estimate', authMiddleware, handleEstimate);
+
+/**
+ * Core status handler (reused for compatibility routes)
+ */
+async function handleStatus(c: any) {
   try {
     const id = c.req.param('id');
     
@@ -322,7 +336,10 @@ app.get('/status/:id', authMiddleware, async (c) => {
       }, 404);
     }
     
-    return c.json(status);
+    return c.json({
+      ...status,
+      request_id: status.id // snake_case alias for compatibility
+    });
     
   } catch (error) {
     console.error('Error in /status:', error);
@@ -332,7 +349,17 @@ app.get('/status/:id', authMiddleware, async (c) => {
       details: { reason: 'internal_error' }
     }, 500);
   }
-});
+}
+
+/**
+ * GET /status/:id
+ * Returns job status and progress
+ * Returns: { phase, percent, note, text? }
+ */
+app.get('/status/:id', authMiddleware, handleStatus);
+
+// Compatibility alias for Business Engine
+app.get('/ttt/status/:id', authMiddleware, handleStatus);
 
 /**
  * Health check endpoint
