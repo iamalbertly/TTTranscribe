@@ -24,6 +24,14 @@ if (isHuggingFace) {
   TMP_DIR = process.env.TMP_DIR || '/tmp/ttt';
 }
 
+// Allow placeholders only when explicitly permitted (default: false on Spaces)
+const allowPlaceholderDownload = (process.env.ALLOW_PLACEHOLDER_DOWNLOAD || (isHuggingFace ? 'false' : 'true')).toLowerCase() === 'true';
+
+// Reusable user-agent and referer for TikTok requests to reduce blocking
+const DEFAULT_UA = process.env.YTDLP_USER_AGENT ||
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
+const DEFAULT_REFERER = process.env.YTDLP_REFERER || 'https://www.tiktok.com/';
+
 /**
  * TikTok media resolver
  * - Resolves redirects (vm.tiktok.com/... → canonical link)
@@ -49,6 +57,9 @@ export async function download(url: string): Promise<string> {
     // For now, use a simple approach - in production you'd use yt-dlp or similar
     // This is a minimal implementation that downloads the audio
     await downloadAudio(canonicalUrl, outputPath);
+
+    // Validate the downloaded audio before returning
+    await ensureValidAudio(outputPath);
     
     return outputPath;
   } catch (error) {
@@ -112,6 +123,29 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     } else {
       ytdlpPaths = ['/usr/local/bin/yt-dlp', '/usr/bin/yt-dlp', 'yt-dlp'];
     }
+
+    // Build common yt-dlp arguments
+    const baseArgs = [
+      '-x',
+      '--audio-format wav',
+      `--user-agent "${DEFAULT_UA}"`,
+      `--referer "${DEFAULT_REFERER}"`,
+    ];
+
+    const impersonate = process.env.YTDLP_IMPERSONATE;
+    if (impersonate) {
+      baseArgs.push(`--impersonate ${impersonate}`);
+    }
+
+    const proxy = process.env.YTDLP_PROXY;
+    if (proxy) {
+      baseArgs.push(`--proxy ${proxy}`);
+    }
+
+    const cookies = process.env.YTDLP_COOKIES;
+    if (cookies) {
+      baseArgs.push(`--cookies "${cookies}"`);
+    }
     
     // For local development on Windows, skip yt-dlp and use placeholder
     if (isWindows && !isHuggingFace) {
@@ -126,7 +160,7 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     let lastError: Error | null = null;
     for (const ytdlpCommand of ytdlpPaths) {
       try {
-        const command = `${ytdlpCommand} -x --audio-format wav --output "${outputPath}" "${url}"`;
+        const command = `${ytdlpCommand} ${baseArgs.join(' ')} --output "${outputPath}" "${url}"`;
         console.log(`[download] Attempting yt-dlp download with: ${ytdlpCommand}`);
         const { stdout, stderr } = await execAsync(command);
         if (stderr && !stderr.includes('WARNING')) {
@@ -151,17 +185,50 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     
   } catch (error) {
     // Fallback to placeholder if yt-dlp fails
-    console.warn(`[download] yt-dlp failed, using placeholder: ${error}`);
-    
+    console.warn(`[download] yt-dlp failed: ${error}`);
+
+    if (!allowPlaceholderDownload) {
+      throw error;
+    }
+
     try {
       const placeholderContent = `# Placeholder audio file for ${url}\n# Downloaded at ${new Date().toISOString()}\n# yt-dlp failed: ${error}`;
       await fs.writeFile(outputPath, placeholderContent);
       console.log(`[download] Created fallback placeholder file at ${outputPath}`);
     } catch (writeError) {
-      // If we can't write to the file system, create a virtual file path
       console.warn(`[download] Cannot write to filesystem: ${writeError}`);
-      // Return the original path even if we can't write - the transcription will handle this
     }
+  }
+}
+
+/**
+ * Ensure the downloaded file is a real WAV (not placeholder or blocked response)
+ */
+async function ensureValidAudio(filePath: string): Promise<void> {
+  try {
+    const stats = await fs.stat(filePath);
+    if (stats.size < 2048) {
+      throw new Error(`Downloaded audio too small (${stats.size} bytes)`);
+    }
+
+    const buffer = await fs.readFile(filePath);
+    const header = buffer.slice(0, 4).toString('ascii');
+    const firstText = buffer.slice(0, 64).toString('utf8');
+
+    if (header !== 'RIFF') {
+      throw new Error(`Invalid WAV header (${header || 'unknown'})`);
+    }
+
+    if (firstText.includes('Placeholder') || firstText.includes('# Placeholder')) {
+      throw new Error('Placeholder audio detected');
+    }
+  } catch (err: any) {
+    // In production (HF), fail fast. In dev, allow if placeholders are enabled.
+    if (!allowPlaceholderDownload || isHuggingFace) {
+      throw err;
+    }
+
+    console.warn(`[download] Non-fatal audio validation issue tolerated in dev: ${err.message}`);
   }
 }
 

@@ -19,6 +19,9 @@ export type StatusPhase =
 export type Status = {
   id: string;
   status: 'queued' | 'processing' | 'completed' | 'failed';
+  phase?: StatusPhase;
+  note?: string;
+  percent?: number;
   progress: number;
   submittedAt: string;
   completedAt?: string;
@@ -205,6 +208,9 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
   const status: Status = {
     id: requestId,
     status: mapPhaseToStatus(phase),
+    phase,
+    note,
+    percent,
     progress: percent,
     submittedAt: jobRecord?.createdAt || now,
     completedAt: phase === 'COMPLETED' ? now : undefined,

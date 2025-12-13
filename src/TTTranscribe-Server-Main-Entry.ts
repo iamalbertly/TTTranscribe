@@ -132,14 +132,14 @@ async function authMiddleware(c: any, next: any) {
  */
 async function rateLimitMiddleware(c: any, next: any) {
   // Skip rate limiting for health checks and root endpoint
-  if (c.req.path === '/health' || c.req.path === '/') {
+  if (c.req.path === '/health' || c.req.path === '/' || c.req.path.startsWith('/status')) {
     await next();
     return;
   }
   
   const clientIP = getClientIP(c);
-  const capacity = parseInt(process.env.RATE_LIMIT_CAPACITY || '10');
-  const refillRate = parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10');
+  const capacity = config?.rateLimitCapacity ?? parseInt(process.env.RATE_LIMIT_CAPACITY || '10');
+  const refillRate = config?.rateLimitRefillPerMin ?? parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10');
   
   // Get or create rate limiter for this IP
   let limiter = rateLimiters.get(clientIP);
@@ -212,7 +212,8 @@ app.post('/transcribe', authMiddleware, async (c) => {
     const requestId = await startJob(url, businessEngineRequestId);
     
     return c.json({ 
-      id: requestId, 
+      id: requestId,
+      request_id: requestId, // alias for clients expecting snake_case
       status: 'queued',
       submittedAt: new Date().toISOString(),
       estimatedProcessingTime: 300,

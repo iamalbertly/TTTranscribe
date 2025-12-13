@@ -17,6 +17,9 @@ const ASR_TIMEOUT_MS = parseInt(process.env.ASR_TIMEOUT_MS || '60000'); // 60 se
  * Transcribe audio using Hugging Face Whisper API
  */
 export async function transcribe(wavPath: string): Promise<string> {
+  // Validate audio before attempting transcription to fail fast on placeholders/blocked downloads
+  await assertValidAudioFile(wavPath);
+
   // Prefer local Whisper (faster-whisper) for reliability and speed
   // No API dependency, works offline, free
   const preferLocal = (process.env.PREFER_LOCAL_WHISPER || 'true').toLowerCase() === 'true';
@@ -46,6 +49,11 @@ export async function transcribe(wavPath: string): Promise<string> {
       console.warn('[transcribe] Falling back to legacy API...');
       // Fall through to legacy API
     }
+  }
+
+  // If we reach here without an API key, fail with a clear message in production
+  if (!HF_API_KEY) {
+    throw new Error('HF_API_KEY is not configured and local transcription failed');
   }
 
   // Fallback 2: Legacy API approach (deprecated, likely won't work)
@@ -82,6 +90,14 @@ async function transcribeWithHfClient(wavPath: string): Promise<string> {
         return result.text;
       }
     } catch (modelError: any) {
+      const message = modelError?.message || '';
+      if (message.toLowerCase().includes('not supported')) {
+        console.warn(`Provider for ${model} does not support ASR, trying next model...`);
+        continue;
+      }
+      if (modelError?.response?.status === 401 || modelError?.response?.status === 403) {
+        throw new Error('HF API key rejected (unauthorized). Please verify HF_API_KEY secret.');
+      }
       console.warn(`Model ${model} failed: ${modelError.message}`);
       continue;
     }
@@ -465,6 +481,35 @@ except Exception as e:
   } catch (error: any) {
     console.error(`[local-whisper] Failed: ${error.message}`);
     throw new Error(`Local Whisper transcription failed: ${error.message}`);
+  }
+}
+
+/**
+ * Strong validation to reject placeholder or malformed audio early
+ */
+async function assertValidAudioFile(wavPath: string): Promise<void> {
+  try {
+    const stats = await fs.promises.stat(wavPath);
+    if (!stats.isFile()) {
+      throw new Error('Audio path is not a file');
+    }
+    if (stats.size < 2048) {
+      throw new Error(`Audio file too small (${stats.size} bytes)`);
+    }
+
+    const buffer = await fs.promises.readFile(wavPath);
+    const header = buffer.slice(0, 4).toString('ascii');
+    const firstText = buffer.slice(0, 64).toString('utf8');
+
+    if (header !== 'RIFF') {
+      throw new Error(`Invalid WAV header (${header || 'unknown'})`);
+    }
+
+    if (firstText.includes('Placeholder') || firstText.includes('# Placeholder')) {
+      throw new Error('Placeholder audio detected');
+    }
+  } catch (err: any) {
+    throw new Error(`Audio validation failed: ${err.message}`);
   }
 }
 
