@@ -46,23 +46,34 @@ export async function download(url: string): Promise<string> {
     } catch (error) {
       console.warn(`Could not create directory ${TMP_DIR}, using fallback:`, error);
     }
-    
+
     // Resolve redirects and get canonical URL
     const canonicalUrl = await resolveCanonicalUrl(url);
-    
+
     // Generate unique filename
     const filename = `audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.wav`;
     const outputPath = path.join(TMP_DIR, filename);
-    
+
     // For now, use a simple approach - in production you'd use yt-dlp or similar
     // This is a minimal implementation that downloads the audio
     await downloadAudio(canonicalUrl, outputPath);
 
     // Validate the downloaded audio before returning
     await ensureValidAudio(outputPath);
-    
+
     return outputPath;
-  } catch (error) {
+  } catch (error: any) {
+    // If error is already user-friendly, pass it through
+    // Otherwise wrap it
+    if (error.message && (
+      error.message.includes('video requires authentication') ||
+      error.message.includes('bypass TikTok') ||
+      error.message.includes('Network error') ||
+      error.message.includes('Video not found') ||
+      error.message.includes('Failed to download video')
+    )) {
+      throw error;
+    }
     throw new Error(`Failed to download audio from ${url}: ${error}`);
   }
 }

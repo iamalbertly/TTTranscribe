@@ -21,7 +21,8 @@
       "Bash(npm install:*)",
       "Bash(npm info:*)",
       "Bash(node -e:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(node test-deployment-validation.js:*)"
     ],
     "deny": [],
     "ask": []
