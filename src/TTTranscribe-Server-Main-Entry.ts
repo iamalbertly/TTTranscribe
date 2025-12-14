@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { startJob, getStatus, initializeJobProcessing } from './TTTranscribe-Queue-Job-Processing';
 import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
+import { isValidTikTokUrl } from './TTTranscribe-Media-TikTok-Download';
 
 // Rate limiting implementation
 class TokenBucket {
@@ -182,32 +183,33 @@ async function handleTranscribe(c: any) {
     }
     
     const { url, requestId: businessEngineRequestId } = body;
+    const sanitizedUrl = typeof url === 'string' ? url.trim() : url;
 
-    if (!url || typeof url !== 'string') {
+    if (!sanitizedUrl || typeof sanitizedUrl !== 'string') {
       return c.json({
         error: 'invalid_url',
         message: 'URL must be a valid TikTok video URL',
         details: {
-          providedUrl: url || 'undefined',
+          providedUrl: sanitizedUrl || 'undefined',
           expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
         }
       }, 400);
     }
 
     // Basic TikTok URL validation
-    if (!url.includes('tiktok.com') && !url.includes('vm.tiktok.com')) {
+    if (!isValidTikTokUrl(sanitizedUrl)) {
       return c.json({
         error: 'invalid_url',
         message: 'URL must be a valid TikTok video URL',
         details: {
-          providedUrl: url,
+          providedUrl: sanitizedUrl,
           expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
         }
       }, 400);
     }
 
     // Start the transcription job with optional Business Engine request ID for webhook callback
-    const requestId = await startJob(url, businessEngineRequestId);
+    const requestId = await startJob(sanitizedUrl, businessEngineRequestId);
     
     return c.json({ 
       id: requestId,
@@ -215,7 +217,7 @@ async function handleTranscribe(c: any) {
       status: 'queued',
       submittedAt: new Date().toISOString(),
       estimatedProcessingTime: 300,
-      url: url
+      url: sanitizedUrl
     }, 202);
     
   } catch (error) {
@@ -258,13 +260,25 @@ async function handleEstimate(c: any) {
     }
 
     const { url } = body;
+    const sanitizedUrl = typeof url === 'string' ? url.trim() : url;
 
-    if (!url || typeof url !== 'string') {
+    if (!sanitizedUrl || typeof sanitizedUrl !== 'string') {
       return c.json({
         error: 'invalid_url',
         message: 'URL must be a valid TikTok video URL',
         details: {
-          providedUrl: url || 'undefined',
+          providedUrl: sanitizedUrl || 'undefined',
+          expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
+        }
+      }, 400);
+    }
+
+    if (!isValidTikTokUrl(sanitizedUrl)) {
+      return c.json({
+        error: 'invalid_url',
+        message: 'URL must be a valid TikTok video URL',
+        details: {
+          providedUrl: sanitizedUrl,
           expectedFormat: 'https://www.tiktok.com/@username/video/1234567890'
         }
       }, 400);

@@ -135,7 +135,7 @@ export async function initializeConfig(): Promise<TTTranscribeConfig> {
 
   const config: TTTranscribeConfig = {
     port: parseInt(process.env.PORT || '8788'),
-    engineSharedSecret: process.env.ENGINE_SHARED_SECRET || '',
+    engineSharedSecret: process.env.ENGINE_SHARED_SECRET || process.env.TTT_SHARED_SECRET || '',
     hfApiKey: process.env.HF_API_KEY,
     asrProvider: process.env.ASR_PROVIDER || 'hf',
     tmpDir: resolvedTmpDir,

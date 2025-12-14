@@ -73,7 +73,11 @@ async function resolveCanonicalUrl(url: string): Promise<string> {
     if (url.includes('vm.tiktok.com')) {
       const response = await fetch(url, { 
         method: 'HEAD',
-        redirect: 'manual'
+        redirect: 'manual',
+        headers: {
+          'User-Agent': DEFAULT_UA,
+          'Referer': DEFAULT_REFERER
+        }
       });
       
       if (response.status === 301 || response.status === 302) {

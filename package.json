@@ -10,6 +10,7 @@
     "test": "node test-api.js",
     "test:contract": "node test-contract.js",
     "test:start": "node start-test.js",
+    "test:all": "npm test",
     "test:e2e": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-Test-Runner.ps1 -Scenario QuickTest",
     "test:e2e:full": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-Test-Runner.ps1 -Scenario FullTest",
     "test:orchestrator": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-E2E-Test-Orchestrator.ps1"
