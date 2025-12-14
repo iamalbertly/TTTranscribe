@@ -95,12 +95,64 @@ async function resolveCanonicalUrl(url: string): Promise<string> {
   }
 }
 
+/**
+ * Parse yt-dlp error and extract user-friendly message
+ */
+function parseYtDlpError(errorMessage: string): { message: string; isAuthError: boolean; isBlockedError: boolean } {
+  const errorText = errorMessage.toLowerCase();
+
+  // Check for authentication/permission errors
+  if (errorText.includes('you do not have permission') ||
+      errorText.includes('log into an account') ||
+      errorText.includes('use --cookies')) {
+    return {
+      message: 'This video requires authentication or is private. The video may be age-restricted, region-locked, or require login.',
+      isAuthError: true,
+      isBlockedError: false
+    };
+  }
+
+  // Check for impersonation/blocking errors
+  if (errorText.includes('impersonation') || errorText.includes('impersonate target')) {
+    return {
+      message: 'Unable to bypass TikTok\'s bot protection. The service needs additional configuration.',
+      isAuthError: false,
+      isBlockedError: true
+    };
+  }
+
+  // Check for network errors
+  if (errorText.includes('network') || errorText.includes('connection') || errorText.includes('timeout')) {
+    return {
+      message: 'Network error while downloading video. Please try again.',
+      isAuthError: false,
+      isBlockedError: false
+    };
+  }
+
+  // Check for video not found
+  if (errorText.includes('not found') || errorText.includes('404') || errorText.includes('video unavailable')) {
+    return {
+      message: 'Video not found. It may have been deleted or the URL is incorrect.',
+      isAuthError: false,
+      isBlockedError: false
+    };
+  }
+
+  // Generic error
+  return {
+    message: 'Failed to download video. Please check the URL and try again.',
+    isAuthError: false,
+    isBlockedError: false
+  };
+}
+
 async function downloadAudio(url: string, outputPath: string): Promise<void> {
   try {
     const { exec } = require('child_process');
     const { promisify } = require('util');
     const execAsync = promisify(exec);
-    
+
     // Determine yt-dlp command based on environment
     // Check for Hugging Face Spaces environment variables
     const isHuggingFace = !!(
@@ -112,7 +164,7 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
       process.env.HUGGINGFACE_SPACE_URL
     );
     const isWindows = process.platform === 'win32';
-    
+
     // Try multiple yt-dlp paths for robustness in Spaces
     let ytdlpPaths = [];
     if (isHuggingFace) {
@@ -150,7 +202,7 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     if (cookies) {
       baseArgs.push(`--cookies "${cookies}"`);
     }
-    
+
     // For local development on Windows, skip yt-dlp and use placeholder
     if (isWindows && !isHuggingFace) {
       console.log(`Skipping yt-dlp on Windows local development, using placeholder for ${url}...`);
@@ -159,40 +211,43 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
       console.log(`Created placeholder audio file at ${outputPath}`);
       return;
     }
-    
+
     // Try downloading with each yt-dlp path until one succeeds
     let lastError: Error | null = null;
     for (const ytdlpCommand of ytdlpPaths) {
       try {
         const command = `${ytdlpCommand} ${baseArgs.join(' ')} --output "${outputPath}" "${url}"`;
-        console.log(`[download] Attempting yt-dlp download with: ${ytdlpCommand}`);
+        console.log(`[download] Attempting with: ${ytdlpCommand}`);
         const { stdout, stderr } = await execAsync(command);
-        if (stderr && !stderr.includes('WARNING')) {
-          console.warn('[download] yt-dlp stderr:', stderr.substring(0, 200));
-        }
+
         // Success - verify file and return
         const stats = await fs.promises.stat(outputPath);
         if (stats.size === 0) {
           throw new Error('Downloaded file is empty');
         }
-        console.log(`[download] Successfully downloaded to ${outputPath} (${stats.size} bytes)`);
+        console.log(`[download] Success: ${outputPath} (${stats.size} bytes)`);
         return; // Success, exit function
       } catch (error: any) {
         lastError = error;
-        console.warn(`[download] yt-dlp path "${ytdlpCommand}" failed: ${error.message}`);
+        console.log(`[download] Failed with ${ytdlpCommand}`);
         // Continue to next path
       }
     }
-    
-    // All yt-dlp paths failed
-    throw lastError || new Error('yt-dlp not found in any standard location');
-    
-  } catch (error) {
-    // Fallback to placeholder if yt-dlp fails
-    console.warn(`[download] yt-dlp failed: ${error}`);
+
+    // All yt-dlp paths failed - parse error for user-friendly message
+    const parsedError = parseYtDlpError(lastError?.message || '');
+    throw new Error(parsedError.message);
+
+  } catch (error: any) {
+    // Parse the error for user-friendly message
+    const parsedError = parseYtDlpError(error.message || String(error));
+
+    // Log detailed error for debugging
+    console.error(`[download] Failed: ${parsedError.message}`);
 
     if (!allowPlaceholderDownload) {
-      throw error;
+      // Throw user-friendly error
+      throw new Error(parsedError.message);
     }
 
     try {

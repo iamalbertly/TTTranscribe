@@ -360,17 +360,21 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       } catch (downloadError: any) {
         const errMsg = downloadError.message || String(downloadError);
         const errStack = downloadError.stack || '';
-        const guidance = 'Tip: configure YTDLP_COOKIES or YTDLP_PROXY if TikTok blocks the Space IP.';
+
+        // User-friendly error message (already parsed by download module)
+        const userMessage = errMsg;
+
         console.error(JSON.stringify({
           type: 'download_error',
           requestId: id,
           phase: 'DOWNLOADING',
-          error: errMsg,
+          error: userMessage,
           stack: errStack.substring(0, 500),
           url: normalizedUrl,
           client: jobRecord?.businessEngineRequestId || null
         }));
-        updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 220)}. ${guidance}`);
+
+        updateStatus(id, 'FAILED', 0, userMessage);
 
         // Send failure webhook to Business Engine
         if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
@@ -380,7 +384,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
             requestId: jobRecord.businessEngineRequestId,
             status: 'failed',
             usage,
-            error: `Download failed: ${errMsg.substring(0, 200)}`,
+            error: userMessage,
             timestamp: new Date().toISOString(),
           }, config.webhookSecret).catch(err => {
             console.error(`[webhook] Failed to send failure webhook for ${id}: ${err.message}`);
