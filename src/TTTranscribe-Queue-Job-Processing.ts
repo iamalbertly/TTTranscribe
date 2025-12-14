@@ -28,6 +28,7 @@ export type Status = {
   estimatedCompletion?: string;
   currentStep?: string;
   error?: string; // Error message when status is 'failed'
+  cacheHit?: boolean; // Indicates if result was served from cache
   result?: {
     transcription: string;
     confidence: number;
@@ -116,7 +117,7 @@ function mapPhaseToCurrentStep(phase: StatusPhase): string {
 /**
  * Update status with structured logging
  */
-function updateStatus(requestId: string, phase: StatusPhase, percent: number, note: string, text?: string, truncated?: boolean, result?: any, metadata?: any): void {
+function updateStatus(requestId: string, phase: StatusPhase, percent: number, note: string, text?: string, truncated?: boolean, result?: any, metadata?: any, cacheHit?: boolean): void {
   const now = new Date().toISOString();
   const nowMs = Date.now();
   const jobRecord = jobRecords.get(requestId);
@@ -217,6 +218,7 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
     estimatedCompletion,
     currentStep: mapPhaseToCurrentStep(phase),
     error: phase === 'FAILED' ? note : undefined, // Include error message when failed
+    cacheHit: cacheHit ?? undefined, // Indicate if result was served from cache
     result: phase === 'COMPLETED' && result ? {
       transcription: text || '',
       confidence: result.confidence || 0.95,
@@ -296,8 +298,8 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
 
     jobRecords.set(id, jobRecord);
 
-    // Return cached result immediately
-    updateStatus(id, 'COMPLETED', 100, 'Retrieved from cache', cached.result.transcription, false, cached.result, cached.metadata);
+    // Return cached result immediately with cache hit indicator
+    updateStatus(id, 'COMPLETED', 100, 'Retrieved from cache', cached.result.transcription, false, cached.result, cached.metadata, true);
 
     // Send webhook for cached result if Business Engine request ID is provided
     if (businessEngineRequestId && config?.webhookUrl) {
@@ -314,6 +316,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         status: 'completed',
         usage,
         timestamp: now,
+        cacheHit: true, // Indicate this was served from cache
       }, config.webhookSecret).catch(err => {
         console.error(`[webhook] Failed to send webhook for cached result ${id}: ${err.message}`);
       });
@@ -356,8 +359,17 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         wavPath = await download(normalizedUrl);
       } catch (downloadError: any) {
         const errMsg = downloadError.message || String(downloadError);
+        const errStack = downloadError.stack || '';
         const guidance = 'Tip: configure YTDLP_COOKIES or YTDLP_PROXY if TikTok blocks the Space IP.';
-        console.error(`Download failed for ${id}: ${errMsg}`);
+        console.error(JSON.stringify({
+          type: 'download_error',
+          requestId: id,
+          phase: 'DOWNLOADING',
+          error: errMsg,
+          stack: errStack.substring(0, 500),
+          url: normalizedUrl,
+          client: jobRecord?.businessEngineRequestId || null
+        }));
         updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 220)}. ${guidance}`);
 
         // Send failure webhook to Business Engine
@@ -384,12 +396,18 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       let rawText: string;
       try {
         rawText = await transcribe(wavPath);
-        
         // Check if transcription failed or returned a placeholder marker
         const normalized = (rawText || '').toString();
         if (normalized.startsWith('[Transcription failed') || normalized.startsWith('[PLACEHOLDER') || normalized.includes('Placeholder')) {
           const messagePreview = normalized.substring(0, 200);
-          console.error(`Transcription returned error/placeholder for ${id}: ${messagePreview}`);
+          console.error(JSON.stringify({
+            type: 'transcription_placeholder',
+            requestId: id,
+            phase: 'TRANSCRIBING',
+            error: messagePreview,
+            url: normalizedUrl,
+            client: jobRecord?.businessEngineRequestId || null
+          }));
           // Mark job as FAILED and include the transcription error in the note. Do NOT cache placeholder or failed results.
           updateStatus(id, 'FAILED', 0, `Transcription failed: ${messagePreview}`);
 
@@ -416,10 +434,17 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       } catch (transcribeError: any) {
         const errMsg = transcribeError.message || String(transcribeError);
         const errStack = transcribeError.stack || '';
-        console.error(`Transcription error for ${id}: ${errMsg}`);
-        console.error(`Stack trace: ${errStack.substring(0, 500)}`);
         // Friendlier hint when audio validation failed (common when TikTok blocks download)
         const hint = errMsg.includes('Audio validation failed') ? ' Hint: TikTok download may have been blocked; add YTDLP_COOKIES or proxy.' : '';
+        console.error(JSON.stringify({
+          type: 'transcription_error',
+          requestId: id,
+          phase: 'TRANSCRIBING',
+          error: errMsg,
+          stack: errStack.substring(0, 500),
+          url: normalizedUrl,
+          client: jobRecord?.businessEngineRequestId || null
+        }));
         updateStatus(id, 'FAILED', 0, `Transcription error: ${errMsg.substring(0, 260)}${hint}`);
 
         // Send failure webhook to Business Engine
@@ -472,13 +497,14 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         description: 'Transcribed TikTok video'
       };
 
-      updateStatus(id, 'COMPLETED', 100, summary, text, truncated, result, metadata);
+      updateStatus(id, 'COMPLETED', 100, summary, text, truncated, result, metadata, false);
 
       // Cache the result for future requests only if transcription did not contain placeholders or failed markers
       if (text && !text.startsWith('[Transcription failed') && !text.startsWith('[PLACEHOLDER')) {
         jobResultCache.set(url, result, metadata);
+        console.log(`[cache] Cached successful transcription for ${url}`);
       } else {
-        console.log(`Not caching result for ${url} due to failure/placeholder content.`);
+        console.log(`[cache] Not caching result for ${url} due to failure/placeholder content.`);
       }
 
       // Send webhook to Business Engine if configured
@@ -496,6 +522,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
           status: 'completed',
           usage,
           timestamp: new Date().toISOString(),
+          cacheHit: false, // Fresh processing, not from cache
         }, config.webhookSecret).catch(err => {
           console.error(`[webhook] Failed to send completion webhook for ${id}: ${err.message}`);
         });
@@ -511,8 +538,17 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
 
     } catch (e: any) {
       const errorMsg = e.message || String(e);
+      const errStack = e.stack || '';
       const phase = jobRecord?.phase || 'UNKNOWN';
-      console.log(`ttt:error req=${id} phase=${phase} msg=${errorMsg.substring(0, 150)}`);
+      console.error(JSON.stringify({
+        type: 'unhandled_job_error',
+        requestId: id,
+        phase,
+        error: errorMsg,
+        stack: errStack.substring(0, 500),
+        url: normalizedUrl,
+        client: jobRecord?.businessEngineRequestId || null
+      }));
       updateStatus(id, 'FAILED', 0, `Error during ${phase}: ${errorMsg.substring(0, 200)}`);
 
       // Send failure webhook to Business Engine

@@ -82,19 +82,32 @@ async function authMiddleware(c: any, next: any) {
   if (config?.isHuggingFace) {
     const authHeader = c.req.header('X-Engine-Auth');
     const expectedSecret = config.engineSharedSecret;
-    
+    const clientInfo = {
+      ip: getClientIP(c),
+      userAgent: c.req.header('User-Agent') || '',
+      clientVersion: c.req.header('X-Client-Version') || '',
+      clientPlatform: c.req.header('X-Client-Platform') || '',
+      path: c.req.path,
+      method: c.req.method
+    };
     if (!authHeader || authHeader !== expectedSecret) {
-      console.log(`❌ Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
+      console.error(JSON.stringify({
+        type: 'auth_error',
+        reason: 'missing_or_invalid_X-Engine-Auth',
+        provided: authHeader ? 'present' : 'missing',
+        expected: 'X-Engine-Auth header with valid secret',
+        ...clientInfo
+      }));
       return c.json({
         error: 'unauthorized',
         message: 'Missing or invalid X-Engine-Auth header',
         details: {
           provided: authHeader ? 'present' : 'missing',
-          expected: 'X-Engine-Auth header with valid secret'
+          expected: 'X-Engine-Auth header with valid secret',
+          ...clientInfo
         }
       }, 401);
     }
-    
     // Only log successful auth on first request or errors to reduce spam
     await next();
     return;
@@ -112,19 +125,32 @@ async function authMiddleware(c: any, next: any) {
   
   const authHeader = c.req.header('X-Engine-Auth');
   const expectedSecret = config?.engineSharedSecret;
-  
+  const clientInfo = {
+    ip: getClientIP(c),
+    userAgent: c.req.header('User-Agent') || '',
+    clientVersion: c.req.header('X-Client-Version') || '',
+    clientPlatform: c.req.header('X-Client-Platform') || '',
+    path: c.req.path,
+    method: c.req.method
+  };
   if (!authHeader || authHeader !== expectedSecret) {
-    console.log(`Authentication failed for ${getClientIP(c)}: missing or invalid X-Engine-Auth header`);
+    console.error(JSON.stringify({
+      type: 'auth_error',
+      reason: 'missing_or_invalid_X-Engine-Auth',
+      provided: authHeader ? 'present' : 'missing',
+      expected: 'X-Engine-Auth header with valid secret',
+      ...clientInfo
+    }));
     return c.json({
       error: 'unauthorized',
       message: 'Missing or invalid X-Engine-Auth header',
       details: {
         provided: authHeader ? 'present' : 'missing',
-        expected: 'X-Engine-Auth header with valid secret'
+        expected: 'X-Engine-Auth header with valid secret',
+        ...clientInfo
       }
     }, 401);
   }
-  
   await next();
 }
 
@@ -132,33 +158,55 @@ async function authMiddleware(c: any, next: any) {
  * Rate limiting middleware
  */
 async function rateLimitMiddleware(c: any, next: any) {
-  // Skip rate limiting for health checks and root endpoint
+  // Skip rate limiting for health checks, root endpoint, and status checks
   if (c.req.path === '/health' || c.req.path === '/' || c.req.path.startsWith('/status')) {
     await next();
     return;
   }
-  
+
   const clientIP = getClientIP(c);
+
+  // Skip rate limiting for Hugging Face internal health checks and monitoring
+  // HF Spaces uses specific IPv6 ranges for health checks
+  if (config?.isHuggingFace && (
+    clientIP.startsWith('2a06:98c0:') || // HF Spaces health check IPv6 range
+    clientIP === 'unknown' ||
+    clientIP === '::1' ||
+    clientIP === '127.0.0.1'
+  )) {
+    console.log(`[rate-limit] Skipping rate limit for HF internal IP: ${clientIP}`);
+    await next();
+    return;
+  }
+
   const capacity = config?.rateLimitCapacity ?? parseInt(process.env.RATE_LIMIT_CAPACITY || '10');
   const refillRate = config?.rateLimitRefillPerMin ?? parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10');
-  
+
   // Get or create rate limiter for this IP
   let limiter = rateLimiters.get(clientIP);
   if (!limiter) {
     limiter = new TokenBucket(capacity, refillRate);
     rateLimiters.set(clientIP, limiter);
   }
-  
+
   if (!limiter.tryConsume()) {
     const retryAfter = limiter.getTimeUntilRefill();
-    console.log(`Rate limit exceeded for ${clientIP}, retry after ${retryAfter} seconds`);
+    console.error(`[rate-limit] Rate limit exceeded for IP ${clientIP}, retry after ${retryAfter} seconds. Path: ${c.req.path}, Method: ${c.req.method}`);
     return c.json({
       error: 'rate_limited',
-      message: 'Too many requests',
-      details: { retryAfter: retryAfter }
+      message: 'Too many requests. Please wait before retrying.',
+      details: {
+        retryAfter: retryAfter,
+        retryAfterTimestamp: new Date(Date.now() + retryAfter * 1000).toISOString(),
+        rateLimitInfo: {
+          capacity,
+          refillRate: `${refillRate} tokens per minute`,
+          tokensRemaining: Math.floor(limiter.getTokensRemaining())
+        }
+      }
     }, 429);
   }
-  
+
   await next();
 }
 

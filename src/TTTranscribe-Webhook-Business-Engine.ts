@@ -15,6 +15,7 @@ export interface WebhookPayload {
     processingTimeSeconds: number;
   };
   error?: string; // Error message if failed
+  cacheHit?: boolean; // Indicates if result was served from cache (for billing optimization)
   timestamp: string;
   idempotencyKey: string; // Unique key to prevent duplicate processing
   signature: string; // HMAC signature for verification
