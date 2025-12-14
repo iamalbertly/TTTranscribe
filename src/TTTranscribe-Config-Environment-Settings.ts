@@ -143,11 +143,16 @@ export async function initializeConfig(): Promise<TTTranscribeConfig> {
     isHuggingFace,
     isLocal,
     baseUrl: getBaseUrl(),
-    allowPlaceholderTranscription: (process.env.ALLOW_PLACEHOLDER_TRANSCRIPTION || 'true').toLowerCase() === 'true',
+    allowPlaceholderTranscription: (process.env.ALLOW_PLACEHOLDER_TRANSCRIPTION ||
+      (isHuggingFace ? 'false' : 'true')).toLowerCase() === 'true',
     rateLimitCapacity: parseInt(process.env.RATE_LIMIT_CAPACITY || '10'),
     rateLimitRefillPerMin: parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10'),
     webhookUrl: process.env.BUSINESS_ENGINE_WEBHOOK_URL || 'https://pluct-business-engine.romeo-lya2.workers.dev/webhooks/tttranscribe',
-    webhookSecret: process.env.BUSINESS_ENGINE_WEBHOOK_SECRET || process.env.SHARED_SECRET || '',
+    webhookSecret: process.env.BUSINESS_ENGINE_WEBHOOK_SECRET
+      || process.env.SHARED_SECRET
+      || process.env.ENGINE_SHARED_SECRET
+      || process.env.TTT_SHARED_SECRET
+      || '',
     apiVersion: process.env.API_VERSION || '1.0.0'
   };
 

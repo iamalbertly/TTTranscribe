@@ -260,20 +260,33 @@ function truncateTextIfNeeded(text: string, maxLength: number): { text: string; 
 }
 
 export async function startJob(url: string, businessEngineRequestId?: string): Promise<string> {
+  // Lightweight normalization to improve cache hits and consistency
+  const normalizedUrl = (() => {
+    try {
+      const trimmed = url.trim();
+      const withoutHash = trimmed.split('#')[0];
+      const u = new URL(withoutHash);
+      u.search = ''; // Drop query params for cache consistency
+      return u.toString().replace(/\/+$/, ''); // Remove trailing slashes
+    } catch {
+      return url;
+    }
+  })();
+
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   // Check cache first
-  const cached = jobResultCache.get(url);
+  const cached = jobResultCache.get(normalizedUrl);
   if (cached) {
     const cachedTextLength = cached.result.transcription?.length || 0;
-    console.log(`Cache hit for ${url}, returning cached result immediately. Text length: ${cachedTextLength}`);
+    console.log(`Cache hit for ${normalizedUrl}, returning cached result immediately. Text length: ${cachedTextLength}`);
 
     // Create job record for cached result
     const jobRecord: JobRecord = {
       requestId: id,
       businessEngineRequestId,
-      url,
+      url: normalizedUrl,
       phase: 'COMPLETED',
       percent: 100,
       note: 'Retrieved from cache',
@@ -309,13 +322,13 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
     return id;
   }
 
-  console.log(`Cache miss for ${url}, processing normally`);
+  console.log(`Cache miss for ${normalizedUrl}, processing normally`);
 
   // Create job record
   const jobRecord: JobRecord = {
     requestId: id,
     businessEngineRequestId,
-    url,
+    url: normalizedUrl,
     phase: 'REQUEST_SUBMITTED',
     percent: 0,
     note: 'queued',
@@ -328,7 +341,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
   // Initialize status
   updateStatus(id, 'REQUEST_SUBMITTED', 0, 'queued');
 
-  console.log(`ttt:accepted req=${id} url=${url.slice(-12)}`);
+  console.log(`ttt:accepted req=${id} url=${normalizedUrl.slice(-12)}`);
 
   // Fire-and-forget async processing
   (async () => {
@@ -340,11 +353,12 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
 
       let wavPath: string;
       try {
-        wavPath = await download(url);
+        wavPath = await download(normalizedUrl);
       } catch (downloadError: any) {
         const errMsg = downloadError.message || String(downloadError);
+        const guidance = 'Tip: configure YTDLP_COOKIES or YTDLP_PROXY if TikTok blocks the Space IP.';
         console.error(`Download failed for ${id}: ${errMsg}`);
-        updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 300)}`);
+        updateStatus(id, 'FAILED', 0, `Download failed: ${errMsg.substring(0, 220)}. ${guidance}`);
 
         // Send failure webhook to Business Engine
         if (jobRecord.businessEngineRequestId && config?.webhookUrl) {
@@ -404,7 +418,9 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         const errStack = transcribeError.stack || '';
         console.error(`Transcription error for ${id}: ${errMsg}`);
         console.error(`Stack trace: ${errStack.substring(0, 500)}`);
-        updateStatus(id, 'FAILED', 0, `Transcription error: ${errMsg.substring(0, 300)}`);
+        // Friendlier hint when audio validation failed (common when TikTok blocks download)
+        const hint = errMsg.includes('Audio validation failed') ? ' Hint: TikTok download may have been blocked; add YTDLP_COOKIES or proxy.' : '';
+        updateStatus(id, 'FAILED', 0, `Transcription error: ${errMsg.substring(0, 260)}${hint}`);
 
         // Send failure webhook to Business Engine
         if (jobRecord.businessEngineRequestId && config?.webhookUrl) {

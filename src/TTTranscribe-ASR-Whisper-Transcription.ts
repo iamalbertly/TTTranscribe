@@ -491,10 +491,10 @@ async function assertValidAudioFile(wavPath: string): Promise<void> {
   try {
     const stats = await fs.promises.stat(wavPath);
     if (!stats.isFile()) {
-      throw new Error('Audio path is not a file');
+      throw new Error(`Audio path is not a file: ${wavPath}`);
     }
     if (stats.size < 2048) {
-      throw new Error(`Audio file too small (${stats.size} bytes)`);
+      throw new Error(`Audio file too small (${stats.size} bytes) at ${wavPath}`);
     }
 
     const buffer = await fs.promises.readFile(wavPath);
@@ -502,11 +502,11 @@ async function assertValidAudioFile(wavPath: string): Promise<void> {
     const firstText = buffer.slice(0, 64).toString('utf8');
 
     if (header !== 'RIFF') {
-      throw new Error(`Invalid WAV header (${header || 'unknown'})`);
+      throw new Error(`Invalid WAV header (${header || 'unknown'}) at ${wavPath}`);
     }
 
     if (firstText.includes('Placeholder') || firstText.includes('# Placeholder')) {
-      throw new Error('Placeholder audio detected');
+      throw new Error(`Placeholder audio detected at ${wavPath}`);
     }
   } catch (err: any) {
     throw new Error(`Audio validation failed: ${err.message}`);
