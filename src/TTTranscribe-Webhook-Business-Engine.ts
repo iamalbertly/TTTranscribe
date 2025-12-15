@@ -32,6 +32,42 @@ const WEBHOOK_CONFIG = {
 };
 
 /**
+ * In-memory queue to re-drive webhooks that failed due to transient network/DNS errors.
+ * Prevents losing billing notifications when Business Engine is briefly unreachable.
+ */
+type QueuedWebhook = {
+  primaryUrl: string;
+  fallbackUrl?: string;
+  payload: WebhookPayload;
+  attempts: number;
+  lastError?: string;
+};
+
+const failedWebhookQueue: QueuedWebhook[] = [];
+let retryTimer: NodeJS.Timeout | null = null;
+
+function startRetryLoop() {
+  if (retryTimer) return;
+  retryTimer = setInterval(async () => {
+    if (failedWebhookQueue.length === 0) return;
+    const job = failedWebhookQueue.shift();
+    if (!job) return;
+    const success = await deliverWebhook(job.payload, job.primaryUrl, job.fallbackUrl);
+    if (!success && job.attempts < WEBHOOK_CONFIG.maxRetries * 3) {
+      job.attempts += 1;
+      failedWebhookQueue.push(job);
+    }
+  }, 30000);
+}
+
+export function getWebhookQueueStats() {
+  return {
+    pending: failedWebhookQueue.length,
+    retryIntervalSeconds: 30,
+  };
+}
+
+/**
  * Generate HMAC signature for webhook payload
  * This allows Business Engine to verify the webhook came from TTTranscribe
  */
@@ -85,6 +121,28 @@ export async function sendWebhookToBusinessEngine(
   console.log(`[webhook] Idempotency key: ${idempotencyKey}`);
   console.log(`[webhook] Usage: ${payload.usage.audioDurationSeconds}s audio, ${payload.usage.transcriptCharacters} chars`);
 
+  const fallbackUrl = process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL;
+  const success = await deliverWebhook(signedPayload, webhookUrl, fallbackUrl);
+  if (!success) {
+    failedWebhookQueue.push({
+      primaryUrl: webhookUrl,
+      fallbackUrl,
+      payload: signedPayload,
+      attempts: 0,
+      lastError: 'exhausted immediate retries'
+    });
+    startRetryLoop();
+    console.error(`[webhook] MANUAL REVIEW REQUIRED: Job ${signedPayload.jobId} queued for retry. Queue size: ${failedWebhookQueue.length}`);
+  }
+
+  return success;
+}
+
+async function deliverWebhook(
+  signedPayload: WebhookPayload,
+  webhookUrl: string,
+  fallbackUrl?: string
+): Promise<boolean> {
   let attempt = 0;
   let lastError: Error | null = null;
 
@@ -98,7 +156,7 @@ export async function sendWebhookToBusinessEngine(
         headers: {
           'Content-Type': 'application/json',
           'X-TTTranscribe-Signature': signedPayload.signature,
-          'X-Idempotency-Key': idempotencyKey,
+          'X-Idempotency-Key': signedPayload.idempotencyKey,
         },
         body: JSON.stringify(signedPayload),
         signal: controller.signal,
@@ -107,13 +165,13 @@ export async function sendWebhookToBusinessEngine(
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        console.log(`[webhook] Successfully sent webhook for job ${payload.jobId} (attempt ${attempt + 1})`);
+        console.log(`[webhook] Successfully sent webhook for job ${signedPayload.jobId} (attempt ${attempt + 1})`);
         return true;
       }
 
       // If Business Engine responds with 409 Conflict, it means webhook was already processed (idempotent)
       if (response.status === 409) {
-        console.log(`[webhook] Webhook for job ${payload.jobId} already processed (409 Conflict), treating as success`);
+        console.log(`[webhook] Webhook for job ${signedPayload.jobId} already processed (409 Conflict), treating as success`);
         return true;
       }
 
@@ -147,12 +205,41 @@ export async function sendWebhookToBusinessEngine(
     }
   }
 
-  console.error(`[webhook] Failed to send webhook for job ${payload.jobId} after ${WEBHOOK_CONFIG.maxRetries} attempts`);
+  if (fallbackUrl) {
+    console.warn(`[webhook] Primary webhook URL failed for job ${signedPayload.jobId}. Attempting fallback URL ${fallbackUrl}`);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_CONFIG.timeoutMs);
+      const response = await fetch(fallbackUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-TTTranscribe-Signature': signedPayload.signature,
+          'X-Idempotency-Key': signedPayload.idempotencyKey,
+        },
+        body: JSON.stringify(signedPayload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (response.ok || response.status === 409) {
+        console.log(`[webhook] Fallback webhook succeeded for job ${signedPayload.jobId}`);
+        return true;
+      }
+      const responseText = await response.text().catch(() => 'Unable to read response');
+      console.warn(`[webhook] Fallback webhook failed: ${response.status} ${response.statusText} - ${responseText.substring(0, 150)}`);
+      lastError = new Error(`Fallback HTTP ${response.status}`);
+    } catch (fallbackErr: any) {
+      console.warn(`[webhook] Fallback webhook threw: ${fallbackErr.message}`);
+      lastError = fallbackErr;
+    }
+  }
+
+  console.error(`[webhook] Failed to send webhook for job ${signedPayload.jobId} after ${WEBHOOK_CONFIG.maxRetries} attempts`);
   console.error(`[webhook] Last error: ${lastError?.message}`);
 
   // Even if webhook fails, we don't want to crash the job processing
   // Log the failure for manual review/retry
-  console.error(`[webhook] MANUAL REVIEW REQUIRED: Job ${payload.jobId} completed but webhook failed`);
+  console.error(`[webhook] MANUAL REVIEW REQUIRED: Job ${signedPayload.jobId} completed but webhook failed`);
 
   return false;
 }

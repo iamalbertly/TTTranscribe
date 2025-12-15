@@ -4,6 +4,7 @@ import { startJob, getStatus, initializeJobProcessing } from './TTTranscribe-Que
 import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 import { isValidTikTokUrl } from './TTTranscribe-Media-TikTok-Download';
+import { getWebhookQueueStats } from './TTTranscribe-Webhook-Business-Engine';
 
 // Rate limiting implementation
 class TokenBucket {
@@ -58,6 +59,15 @@ const app = new Hono();
 let config: TTTranscribeConfig;
 
 /**
+ * Parse Bearer token from Authorization header for Business Engine compatibility.
+ */
+function getBearerToken(authHeader?: string | null): string | null {
+  if (!authHeader) return null;
+  const match = authHeader.match(/Bearer (.+)/i);
+  return match ? match[1].trim() : null;
+}
+
+/**
  * Safely parse JSON body while preserving the raw payload for diagnostics.
  * Helps debug malformed bodies coming from upstream proxies (Business Engine/mobile).
  */
@@ -109,7 +119,7 @@ async function authMiddleware(c: any, next: any) {
   
   // Never bypass authentication in production (Hugging Face Spaces)
   if (config?.isHuggingFace) {
-    const authHeader = c.req.header('X-Engine-Auth');
+    const authHeader = c.req.header('X-Engine-Auth') || getBearerToken(c.req.header('Authorization'));
     const expectedSecret = config.engineSharedSecret;
     const clientInfo = {
       ip: getClientIP(c),
@@ -152,7 +162,7 @@ async function authMiddleware(c: any, next: any) {
     return;
   }
   
-  const authHeader = c.req.header('X-Engine-Auth');
+  const authHeader = c.req.header('X-Engine-Auth') || getBearerToken(c.req.header('Authorization'));
   const expectedSecret = config?.engineSharedSecret;
   const clientInfo = {
     ip: getClientIP(c),
@@ -477,6 +487,11 @@ app.get('/health', async (c) => {
       hitCount: cacheStats.hitCount,
       missCount: cacheStats.missCount,
       oldestEntry: cacheStats.oldestEntry
+    },
+    webhook: {
+      queueSize: getWebhookQueueStats().pending,
+      retryIntervalSeconds: getWebhookQueueStats().retryIntervalSeconds,
+      targetUrl: config.webhookUrl
     },
     environment: {
       hasAuthSecret: !!config.engineSharedSecret,
