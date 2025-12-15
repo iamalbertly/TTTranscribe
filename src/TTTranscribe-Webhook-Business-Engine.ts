@@ -121,7 +121,12 @@ export async function sendWebhookToBusinessEngine(
   console.log(`[webhook] Idempotency key: ${idempotencyKey}`);
   console.log(`[webhook] Usage: ${payload.usage.audioDurationSeconds}s audio, ${payload.usage.transcriptCharacters} chars`);
 
-  const fallbackUrl = process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL;
+  // Derive a sensible fallback if the primary endpoint is unreachable (DNS issues on regional host).
+  const derivedFallback = webhookUrl.includes('romeo-lya2.')
+    ? webhookUrl.replace('romeo-lya2.', '')
+    : undefined;
+  const fallbackUrl = process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL || derivedFallback;
+
   const success = await deliverWebhook(signedPayload, webhookUrl, fallbackUrl);
   if (!success) {
     failedWebhookQueue.push({
