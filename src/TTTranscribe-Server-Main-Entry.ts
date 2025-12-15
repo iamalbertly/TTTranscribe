@@ -58,6 +58,35 @@ const app = new Hono();
 let config: TTTranscribeConfig;
 
 /**
+ * Safely parse JSON body while preserving the raw payload for diagnostics.
+ * Helps debug malformed bodies coming from upstream proxies (Business Engine/mobile).
+ */
+async function readJsonBody(c: any): Promise<{ data: any | null; raw: string }> {
+  const raw = await c.req.text();
+
+  if (!raw || raw.trim().length === 0) {
+    return { data: null, raw: '' };
+  }
+
+  try {
+    return { data: JSON.parse(raw), raw };
+  } catch (err: any) {
+    console.error('JSON parsing error:', {
+      message: err?.message,
+      rawPreview: raw.substring(0, 200),
+      contentType: c.req.header('content-type') || 'missing',
+      client: {
+        ip: getClientIP(c),
+        userAgent: c.req.header('User-Agent') || '',
+        clientVersion: c.req.header('X-Client-Version') || '',
+        clientPlatform: c.req.header('X-Client-Platform') || '',
+      }
+    });
+    throw err;
+  }
+}
+
+/**
  * Get client IP address (considering X-Forwarded-For header)
  */
 function getClientIP(c: any): string {
@@ -215,22 +244,25 @@ async function rateLimitMiddleware(c: any, next: any) {
  */
 async function handleTranscribe(c: any) {
   try {
-    let body;
+    let parsedBody;
+    let rawBody = '';
     try {
-      body = await c.req.json();
-    } catch (jsonError) {
-      console.error('JSON parsing error:', jsonError);
+      const { data, raw } = await readJsonBody(c);
+      parsedBody = data;
+      rawBody = raw;
+    } catch (jsonError: any) {
       return c.json({
         error: 'invalid_request',
         message: 'Invalid JSON in request body',
         details: {
           reason: 'malformed_json',
-          expectedFormat: '{"url": "https://www.tiktok.com/@username/video/1234567890"}'
+          expectedFormat: '{"url": "https://www.tiktok.com/@username/video/1234567890"}',
+          rawPreview: rawBody.substring(0, 120) || undefined
         }
       }, 400);
     }
     
-    const { url, requestId: businessEngineRequestId } = body;
+    const { url, requestId: businessEngineRequestId } = parsedBody || {};
     const sanitizedUrl = typeof url === 'string' ? url.trim() : url;
 
     if (!sanitizedUrl || typeof sanitizedUrl !== 'string') {
@@ -261,6 +293,7 @@ async function handleTranscribe(c: any) {
     
     return c.json({ 
       id: requestId,
+      requestId: requestId, // camelCase alias for Business Engine compatibility
       request_id: requestId, // alias for clients expecting snake_case
       status: 'queued',
       submittedAt: new Date().toISOString(),

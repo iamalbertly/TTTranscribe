@@ -14,6 +14,33 @@ const ASR_MAX_RETRIES = parseInt(process.env.ASR_MAX_RETRIES || '2');
 const ASR_TIMEOUT_MS = parseInt(process.env.ASR_TIMEOUT_MS || '60000'); // 60 second default timeout
 
 /**
+ * Attempt to parse upstream ASR responses even when providers return extra bytes
+ * (e.g., HTML error pages, duplicated JSON, or BOM-prefixed payloads).
+ */
+function tryParseUpstreamJson(responseText: string): any {
+  const trimmed = responseText.trim();
+
+  // Fast path when already valid JSON
+  try {
+    return JSON.parse(trimmed);
+  } catch (err) {
+    // Attempt to salvage first JSON object in the payload
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      const candidate = trimmed.slice(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(candidate);
+      } catch (innerErr) {
+        // Fall through to error below
+      }
+    }
+
+    throw new Error(`Failed to parse upstream ASR response (${(err as Error).message}). Preview: ${trimmed.substring(0, 200)}`);
+  }
+}
+
+/**
  * Transcribe audio using Hugging Face Whisper API
  */
 export async function transcribe(wavPath: string): Promise<string> {
@@ -368,9 +395,8 @@ async function transcribeWithLegacyAPI(wavPath: string): Promise<string> {
       if (responseText.trim().startsWith('<!') || responseText.includes('<html')) {
         throw new Error('Response is HTML, not JSON. Endpoint may have returned an error page.');
       }
-      
-      // Try to parse as JSON
-      result = JSON.parse(responseText);
+      // Try to parse as JSON (with recovery for trailing bytes)
+      result = tryParseUpstreamJson(responseText);
     } catch (parseError: any) {
       // If JSON parsing fails, check if it's a plain string transcription
       if (responseText && responseText.length > 0 && !responseText.includes('<') && !responseText.includes('Error')) {
