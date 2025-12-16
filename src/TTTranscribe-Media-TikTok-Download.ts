@@ -247,7 +247,13 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
 
     // All yt-dlp paths failed - parse error for user-friendly message
     const parsedError = parseYtDlpError(lastError?.message || '');
-    throw new Error(parsedError.message);
+    console.warn(`[download] yt-dlp failed for ${url}, trying TikWM fallback... (${parsedError.message})`);
+
+    // Fallback: attempt download via TikWM API (no-auth public endpoint)
+    const fallbackSucceeded = await downloadViaTikwmApi(url, outputPath).catch(() => false);
+    if (!fallbackSucceeded) {
+      throw new Error(parsedError.message);
+    }
 
   } catch (error: any) {
     // Parse the error for user-friendly message
@@ -268,6 +274,61 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     } catch (writeError) {
       console.warn(`[download] Cannot write to filesystem: ${writeError}`);
     }
+  }
+}
+
+/**
+ * Fallback downloader via public TikWM API -> MP4 -> WAV (ffmpeg).
+ * This helps when yt-dlp is blocked by TikTok anti-bot protections.
+ */
+async function downloadViaTikwmApi(url: string, wavOutputPath: string): Promise<boolean> {
+  try {
+    const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`;
+    const resp = await fetch(apiUrl, {
+      headers: { 'User-Agent': DEFAULT_UA, 'Referer': DEFAULT_REFERER }
+    });
+    if (!resp.ok) {
+      console.warn(`[tikwm] API returned ${resp.status}`);
+      return false;
+    }
+    const data: any = await resp.json();
+    const videoUrl = data?.data?.play;
+    if (!videoUrl) {
+      console.warn('[tikwm] Missing play URL in response');
+      return false;
+    }
+
+    // Download video to temp MP4
+    const mp4Path = wavOutputPath.replace(/\.wav$/i, '.mp4');
+    const videoResp = await fetch(videoUrl, { headers: { 'User-Agent': DEFAULT_UA } });
+    if (!videoResp.ok) {
+      console.warn(`[tikwm] Failed to download video asset: ${videoResp.status}`);
+      return false;
+    }
+    const fileStream = fs.createWriteStream(mp4Path);
+    await new Promise((resolve, reject) => {
+      videoResp.body?.pipe(fileStream);
+      videoResp.body?.on('error', (err: any) => reject(err));
+      fileStream.on('finish', () => resolve(true));
+    });
+
+    // Convert to WAV using ffmpeg
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    const cmd = `ffmpeg -y -i "${mp4Path}" -vn -acodec pcm_s16le -ar 44100 -ac 1 "${wavOutputPath}"`;
+    await execAsync(cmd);
+
+    // Cleanup mp4
+    try { await fs.remove(mp4Path); } catch {}
+
+    // Validate resulting WAV
+    await ensureValidAudio(wavOutputPath);
+    console.log('[tikwm] Fallback download + convert succeeded');
+    return true;
+  } catch (err: any) {
+    console.warn(`[tikwm] Fallback failed: ${err.message}`);
+    return false;
   }
 }
 
