@@ -80,26 +80,20 @@ export async function download(url: string): Promise<string> {
 
 async function resolveCanonicalUrl(url: string): Promise<string> {
   try {
-    // Handle vm.tiktok.com redirects
-    if (url.includes('vm.tiktok.com')) {
-      const response = await fetch(url, { 
-        method: 'HEAD',
-        redirect: 'manual',
-        headers: {
-          'User-Agent': DEFAULT_UA,
-          'Referer': DEFAULT_REFERER
-        }
-      });
-      
-      if (response.status === 301 || response.status === 302) {
-        const location = response.headers.get('location');
-        if (location) {
-          return location;
-        }
+    // Follow redirects to get canonical URL (vm.tiktok.com -> long form)
+    const response = await fetch(url, { 
+      method: 'GET',
+      redirect: 'follow',
+      headers: {
+        'User-Agent': DEFAULT_UA,
+        'Referer': DEFAULT_REFERER
       }
-    }
-    
-    return url;
+    });
+    const finalUrl = response.url || url;
+    // Strip query params for cache consistency
+    const withoutHash = finalUrl.split('#')[0];
+    const canonical = withoutHash.split('?')[0];
+    return canonical;
   } catch (error) {
     // If redirect resolution fails, return original URL
     return url;
