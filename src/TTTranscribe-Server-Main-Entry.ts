@@ -4,6 +4,7 @@ import { startJob, getStatus, initializeJobProcessing } from './TTTranscribe-Que
 import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 import { isValidTikTokUrl } from './TTTranscribe-Media-TikTok-Download';
+import fetch from 'node-fetch';
 import { getWebhookQueueStats } from './TTTranscribe-Webhook-Business-Engine';
 
 // Rate limiting implementation
@@ -58,6 +59,15 @@ const app = new Hono();
 // Initialize environment-aware configuration
 let config: TTTranscribeConfig;
 
+type ReadinessState = {
+  ok: boolean;
+  checkedAt: number;
+  message?: string;
+  missing?: string[];
+};
+
+let readinessCache: ReadinessState = { ok: true, checkedAt: 0, message: 'not checked yet' };
+
 /**
  * Parse Bearer token from Authorization header for Business Engine compatibility.
  */
@@ -94,6 +104,42 @@ async function readJsonBody(c: any): Promise<{ data: any | null; raw: string }> 
     });
     throw err;
   }
+}
+
+async function checkReadiness(): Promise<ReadinessState> {
+  const now = Date.now();
+  if (now - readinessCache.checkedAt < 30000 && readinessCache.checkedAt !== 0) {
+    return readinessCache;
+  }
+
+  const missing: string[] = [];
+  if (!config?.engineSharedSecret) missing.push('ENGINE_SHARED_SECRET');
+  if (!config?.webhookUrl) missing.push('BUSINESS_ENGINE_WEBHOOK_URL');
+  if (!config?.hfApiKey) missing.push('HF_API_KEY');
+
+  if (missing.length > 0) {
+    readinessCache = { ok: false, checkedAt: now, missing, message: 'Missing required secrets' };
+    return readinessCache;
+  }
+
+  // Lightweight DNS reachability check for webhook host
+  let webhookReachable = true;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    await fetch(config.webhookUrl, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timeoutId);
+  } catch (err: any) {
+    webhookReachable = false;
+  }
+
+  if (!webhookReachable) {
+    readinessCache = { ok: false, checkedAt: now, message: 'Webhook endpoint unreachable', missing: [] };
+    return readinessCache;
+  }
+
+  readinessCache = { ok: true, checkedAt: now, message: 'ready' };
+  return readinessCache;
 }
 
 /**
@@ -271,6 +317,18 @@ async function handleTranscribe(c: any) {
         }
       }, 400);
     }
+
+    const readiness = await checkReadiness();
+    if (!readiness.ok) {
+      return c.json({
+        error: 'service_unavailable',
+        message: 'TTTranscribe is not ready yet',
+        details: {
+          reason: readiness.message,
+          missing: readiness.missing
+        }
+      }, 503);
+    }
     
     const { url, requestId: businessEngineRequestId } = parsedBody || {};
     const sanitizedUrl = typeof url === 'string' ? url.trim() : url;
@@ -305,6 +363,7 @@ async function handleTranscribe(c: any) {
       id: requestId,
       requestId: requestId, // camelCase alias for Business Engine compatibility
       request_id: requestId, // alias for clients expecting snake_case
+      statusPollUrl: `${config.baseUrl}/status/${requestId}`,
       status: 'queued',
       submittedAt: new Date().toISOString(),
       estimatedProcessingTime: 300,
@@ -471,6 +530,9 @@ app.get('/ttt/status/:id', authMiddleware, handleStatus);
  */
 app.get('/health', async (c) => {
   const cacheStats = jobResultCache.getStats();
+  const readiness = await checkReadiness();
+  const capacity = config?.rateLimitCapacity ?? parseInt(process.env.RATE_LIMIT_CAPACITY || '10');
+  const refillRate = config?.rateLimitRefillPerMin ?? parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10');
 
   return c.json({
     status: 'healthy',
@@ -487,6 +549,15 @@ app.get('/health', async (c) => {
       hitCount: cacheStats.hitCount,
       missCount: cacheStats.missCount,
       oldestEntry: cacheStats.oldestEntry
+    },
+    readiness: {
+      ok: readiness.ok,
+      message: readiness.message,
+      missing: readiness.missing
+    },
+    rateLimit: {
+      capacityPerIp: capacity,
+      refillPerMinute: refillRate
     },
     webhook: {
       queueSize: getWebhookQueueStats().pending,
@@ -518,6 +589,10 @@ app.get('/', async (c) => {
     apiVersion: config.apiVersion,
     platform: config.isHuggingFace ? 'huggingface-spaces' : 'local',
     baseUrl: config.baseUrl,
+    rateLimit: {
+      capacityPerIp: config?.rateLimitCapacity ?? parseInt(process.env.RATE_LIMIT_CAPACITY || '10'),
+      refillPerMinute: config?.rateLimitRefillPerMin ?? parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10'),
+    },
     supportedClientVersions: {
       minimum: '1.0.0',
       recommended: '1.0.0',
@@ -538,7 +613,7 @@ app.get('/', async (c) => {
         method: 'POST',
         url: `${config.baseUrl}/transcribe`,
         headers: {
-          'X-Engine-Auth': 'your-secret-key',
+          'Authorization': 'Bearer <ENGINE_SHARED_SECRET>',
           'Content-Type': 'application/json',
           'X-Client-Version': '1.0.0',
           'X-Client-Platform': 'ios|android|web'
@@ -552,7 +627,7 @@ app.get('/', async (c) => {
         method: 'POST',
         url: `${config.baseUrl}/estimate`,
         headers: {
-          'X-Engine-Auth': 'your-secret-key',
+          'Authorization': 'Bearer <ENGINE_SHARED_SECRET>',
           'Content-Type': 'application/json'
         },
         body: { url: 'https://vm.tiktok.com/ZMADQVF4e/' }
@@ -560,10 +635,27 @@ app.get('/', async (c) => {
       status: {
         method: 'GET',
         url: `${config.baseUrl}/status/{request_id}`,
-        headers: { 'X-Engine-Auth': 'your-secret-key' }
+        headers: { 'Authorization': 'Bearer <ENGINE_SHARED_SECRET>' }
       }
+    },
+    errors: {
+      download_blocked: 'TikTok blocked the download (bot protection). Try later.',
+      download_not_found: 'Video not found or removed.',
+      download_network: 'Network error while downloading video.',
+      download_unknown: 'Unknown download failure.'
     }
   });
+});
+
+/**
+ * Deep readiness probe endpoint (lightweight)
+ */
+app.get('/ready', async (c) => {
+  const readiness = await checkReadiness();
+  if (!readiness.ok) {
+    return c.json({ ready: false, reason: readiness.message, missing: readiness.missing }, 503);
+  }
+  return c.json({ ready: true, checkedAt: readiness.checkedAt });
 });
 
 // Error handling

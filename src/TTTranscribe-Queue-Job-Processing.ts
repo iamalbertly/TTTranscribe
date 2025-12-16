@@ -359,10 +359,11 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         wavPath = await download(normalizedUrl);
       } catch (downloadError: any) {
         const errMsg = downloadError.message || String(downloadError);
+        const errCode = downloadError.code || 'download_unknown';
         const errStack = downloadError.stack || '';
 
         // User-friendly error message (already parsed by download module)
-        const userMessage = errMsg;
+        const userMessage = `${errMsg}${errCode ? ` [code: ${errCode}]` : ''}`;
 
         console.error(JSON.stringify({
           type: 'download_error',

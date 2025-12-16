@@ -109,7 +109,9 @@ async function resolveCanonicalUrl(url: string): Promise<string> {
 /**
  * Parse yt-dlp error and extract user-friendly message
  */
-function parseYtDlpError(errorMessage: string): { message: string; isAuthError: boolean; isBlockedError: boolean } {
+type DownloadErrorCode = 'download_blocked' | 'download_not_found' | 'download_network' | 'download_unknown' | 'download_auth';
+
+function parseYtDlpError(errorMessage: string): { message: string; isAuthError: boolean; isBlockedError: boolean; code: DownloadErrorCode } {
   const errorText = errorMessage.toLowerCase();
 
   // Check for authentication/permission errors
@@ -119,7 +121,8 @@ function parseYtDlpError(errorMessage: string): { message: string; isAuthError: 
     return {
       message: 'This video requires authentication or is private. The video may be age-restricted, region-locked, or require login.',
       isAuthError: true,
-      isBlockedError: false
+      isBlockedError: false,
+      code: 'download_auth'
     };
   }
 
@@ -128,7 +131,8 @@ function parseYtDlpError(errorMessage: string): { message: string; isAuthError: 
     return {
       message: 'Unable to bypass TikTok\'s bot protection. The service needs additional configuration.',
       isAuthError: false,
-      isBlockedError: true
+      isBlockedError: true,
+      code: 'download_blocked'
     };
   }
 
@@ -137,7 +141,8 @@ function parseYtDlpError(errorMessage: string): { message: string; isAuthError: 
     return {
       message: 'Network error while downloading video. Please try again.',
       isAuthError: false,
-      isBlockedError: false
+      isBlockedError: false,
+      code: 'download_network'
     };
   }
 
@@ -146,7 +151,8 @@ function parseYtDlpError(errorMessage: string): { message: string; isAuthError: 
     return {
       message: 'Video not found. It may have been deleted or the URL is incorrect.',
       isAuthError: false,
-      isBlockedError: false
+      isBlockedError: false,
+      code: 'download_not_found'
     };
   }
 
@@ -154,7 +160,8 @@ function parseYtDlpError(errorMessage: string): { message: string; isAuthError: 
   return {
     message: 'Failed to download video. Please check the URL and try again.',
     isAuthError: false,
-    isBlockedError: false
+    isBlockedError: false,
+    code: 'download_unknown'
   };
 }
 
@@ -252,7 +259,9 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     // Fallback: attempt download via TikWM API (no-auth public endpoint)
     const fallbackSucceeded = await downloadViaTikwmApi(url, outputPath).catch(() => false);
     if (!fallbackSucceeded) {
-      throw new Error(parsedError.message);
+      const err: any = new Error(parsedError.message);
+      err.code = parsedError.code;
+      throw err;
     }
 
   } catch (error: any) {
@@ -264,7 +273,9 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
 
     if (!allowPlaceholderDownload) {
       // Throw user-friendly error
-      throw new Error(parsedError.message);
+      const err: any = new Error(parsedError.message);
+      err.code = parsedError.code;
+      throw err;
     }
 
     try {
