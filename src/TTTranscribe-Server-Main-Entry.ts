@@ -133,12 +133,12 @@ async function checkReadiness(): Promise<ReadinessState> {
     webhookReachable = false;
   }
 
-  if (!webhookReachable) {
-    readinessCache = { ok: false, checkedAt: now, message: 'Webhook endpoint unreachable', missing: [] };
-    return readinessCache;
-  }
-
-  readinessCache = { ok: true, checkedAt: now, message: 'ready' };
+  readinessCache = {
+    ok: true,
+    checkedAt: now,
+    message: webhookReachable ? 'ready' : 'Webhook endpoint unreachable (will retry but accepting requests)',
+    missing: []
+  };
   return readinessCache;
 }
 
