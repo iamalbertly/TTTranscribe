@@ -24,7 +24,8 @@
       "Bash(python3:*)",
       "Bash(node test-deployment-validation.js:*)",
       "Bash(BASE_URL=\"https://iamromeoly-tttranscribe.hf.space\" node -e:*)",
-      "Bash(nslookup:*)"
+      "Bash(nslookup:*)",
+      "Bash(SHARED_SECRET=\"test-secret-local\" BASE_URL=\"https://iamromeoly-tttranscribe.hf.space\" node:*)"
     ],
     "deny": [],
     "ask": []

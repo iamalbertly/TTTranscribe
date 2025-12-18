@@ -70,3 +70,17 @@ scripts/*.local.ps1
 # Test files
 test_server.py
 test_simple.py
+
+# Node.js (TypeScript project)
+node_modules/
+package-lock.json
+*.js.map
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.nyc_output/
+coverage/
+
+# TypeScript build output
+dist/
+*.tsbuildinfo

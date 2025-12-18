@@ -24,16 +24,20 @@ TTTranscribe is a production-ready TikTok transcription service that provides st
 ## Features
 
 - **🚀 Fast API**: Accepts transcription requests and returns immediately with a request ID
+- **🔐 JWT Authentication**: Secure token-based authentication with expiration and audit trails
+- **🔄 Poll-First Architecture**: Primary status polling with optional webhooks (no silent failures)
+- **💬 Progressive Status Messages**: User-friendly messages at each processing phase
+- **💰 Cost Transparency**: Upfront cost estimation with cache hit = free indicator
 - **📊 Status Tracking**: Real-time status updates with phase progression
 - **🎵 TikTok Support**: Handles TikTok URLs with redirect resolution and audio extraction
 - **🤖 Local Whisper**: Uses openai-whisper for reliable, offline transcription (with HF API fallback)
 - **📝 Structured Logging**: Consistent log format for monitoring and debugging
 - **🌍 Environment Adaptive**: Automatically detects and adapts to local vs. Hugging Face Spaces
 - **💪 Production Ready**: Comprehensive error handling, fallbacks, and resilience
-- **💰 Monetization Ready**: Webhook callbacks, usage metering, and cost estimation for credit-based billing
 - **🔒 HMAC Signatures**: Secure webhook verification with timing-safe comparison
 - **🔄 Idempotency**: Prevents duplicate charges with built-in idempotency key system
 - **📈 Usage Metrics**: Accurate audio duration extraction, character count, and model tracking
+- **🛠️ Admin Endpoints**: Webhook queue visibility and manual retry for operations team
 
 ## API Endpoints
 
@@ -95,9 +99,54 @@ Get the current status of a transcription job.
 - `completed` - Job completed successfully
 - `failed` - Job failed with error
 
-## Usage
+## Authentication
 
-### Authentication
+### JWT Authentication (Recommended)
+
+TTTranscribe supports JWT (JSON Web Token) authentication for improved security:
+
+```typescript
+import jwt from 'jsonwebtoken';
+
+// Generate token (Business Engine)
+const token = jwt.sign(
+  {
+    iss: 'pluct-business-engine',
+    sub: 'request-id-123',
+    aud: 'tttranscribe',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: Math.floor(Date.now() / 1000),
+  },
+  process.env.JWT_SECRET,
+  { algorithm: 'HS256' }
+);
+
+// Use in requests
+fetch('https://iamromeoly-tttranscribe.hf.space/transcribe', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ url: 'https://www.tiktok.com/@user/video/123' })
+});
+```
+
+**Benefits:**
+- Time-limited tokens (1 hour expiration)
+- Audit trail via requestId in JWT sub claim
+- Industry-standard security protocol
+- No server-side session storage needed
+
+### Static Secret (Backward Compatible)
+
+Legacy authentication method still supported:
+
+```http
+X-Engine-Auth: your-shared-secret
+```
+
+## Usage
 All requests require the `X-Engine-Auth` header with the shared secret:
 
 ```bash

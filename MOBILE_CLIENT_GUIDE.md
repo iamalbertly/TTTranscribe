@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide shows mobile app developers how to integrate with the improved TTTranscribe API and handle all response scenarios.
+This guide shows mobile app developers how to integrate with TTTranscribe's poll-first architecture using JWT authentication.
 
 ## API Endpoint
 
@@ -10,20 +10,45 @@ This guide shows mobile app developers how to integrate with the improved TTTran
 
 ## Authentication
 
-All requests (except `/health` and `/`) require authentication:
+### JWT Authentication (Recommended)
 
+TTTranscribe now supports JWT (JSON Web Token) authentication for improved security and audit trails.
+
+**Generate JWT Token (Business Engine):**
+```typescript
+import jwt from 'jsonwebtoken';
+
+function generateTTTranscribeToken(requestId: string): string {
+  return jwt.sign(
+    {
+      iss: 'pluct-business-engine',
+      sub: requestId,
+      aud: 'tttranscribe',
+      exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour
+      iat: Math.floor(Date.now() / 1000),
+    },
+    process.env.JWT_SECRET,
+    { algorithm: 'HS256' }
+  );
+}
 ```
+
+**Use JWT in Requests:**
+```http
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+X-Client-Version: 1.0.0
+X-Client-Platform: ios|android
+```
+
+### Static Secret (Backward Compatible)
+
+Legacy authentication method still supported:
+```http
 X-Engine-Auth: <your-secret-key>
 ```
 
-### Recommended Headers
-
-```
-X-Engine-Auth: <secret>
-X-Client-Version: 1.0.0
-X-Client-Platform: ios|android
-Content-Type: application/json
-```
+**Note:** JWT is preferred for security, token expiration, and audit trails.
 
 ## Flow
 
@@ -46,43 +71,98 @@ POST /transcribe
 {
   "id": "ttt-job-uuid",
   "status": "queued",
+  "message": "Job queued, waiting for processing...",
+  "statusUrl": "https://iamromeoly-tttranscribe.hf.space/status/ttt-job-uuid",
+  "pollIntervalSeconds": 3,
   "submittedAt": "2025-12-14T23:30:00.000Z",
   "estimatedProcessingTime": 300,
   "url": "https://vm.tiktok.com/ZMAoYtB5p/"
 }
 ```
 
-### 2. Poll for Status
+**NEW:** Response now includes:
+- `message` - User-friendly progressive status message
+- `statusUrl` - Direct URL to poll for updates
+- `pollIntervalSeconds` - Recommended polling interval (3 seconds)
+
+### 2. Poll for Status (Poll-First Architecture)
 
 ```http
 GET /status/:id
 ```
 
 **Headers:**
+```http
+Authorization: Bearer <jwt-token>
 ```
-X-Engine-Auth: <secret>
+*or legacy:* `X-Engine-Auth: <secret>`
+
+**Polling Strategy (Recommended):**
+- Poll every 3 seconds during active processing
+- Use exponential backoff after 10 polls (3s → 5s → 10s max)
+- Continue polling until `status === 'completed'` or `status === 'failed'`
+
+#### Scenario A: Queued (Waiting to Start)
+
+```json
+{
+  "id": "ttt-job-uuid",
+  "status": "queued",
+  "phase": "REQUEST_SUBMITTED",
+  "progress": 0,
+  "message": "Job queued, waiting for processing...",
+  "statusUrl": "https://iamromeoly-tttranscribe.hf.space/status/ttt-job-uuid",
+  "pollIntervalSeconds": 3,
+  "estimatedCompletion": "2025-12-14T23:30:15.000Z"
+}
 ```
 
-#### Scenario A: Processing (Still Working)
+**UI Recommendations:**
+- Show loading spinner
+- Display message: "Job queued, waiting for processing..."
+- No progress bar yet
+
+#### Scenario B: Downloading Video
+
+```json
+{
+  "id": "ttt-job-uuid",
+  "status": "processing",
+  "phase": "DOWNLOADING",
+  "progress": 20,
+  "message": "Downloading video from TikTok... (this may take 10-30 seconds)",
+  "statusUrl": "https://iamromeoly-tttranscribe.hf.space/status/ttt-job-uuid",
+  "pollIntervalSeconds": 3,
+  "estimatedCompletion": "2025-12-14T23:30:45.000Z"
+}
+```
+
+**UI Recommendations:**
+- Show progress bar at 20%
+- Display: "Downloading video from TikTok..."
+- Show subtitle: "This may take 10-30 seconds"
+
+#### Scenario C: Transcribing Audio
 
 ```json
 {
   "id": "ttt-job-uuid",
   "status": "processing",
   "phase": "TRANSCRIBING",
-  "progress": 45,
-  "currentStep": "transcription",
-  "note": "Transcribing audio",
-  "estimatedCompletion": "2025-12-14T23:35:00.000Z"
+  "progress": 60,
+  "message": "Transcribing audio with Whisper AI... (processing 45s of audio)",
+  "statusUrl": "https://iamromeoly-tttranscribe.hf.space/status/ttt-job-uuid",
+  "pollIntervalSeconds": 3,
+  "estimatedCompletion": "2025-12-14T23:32:00.000Z"
 }
 ```
 
 **UI Recommendations:**
-- Show progress bar at 45%
-- Display "Transcribing audio..." message
-- Show ETA: "Ready in ~2 minutes"
+- Show progress bar at 60%
+- Display: "Transcribing audio with Whisper AI..."
+- Show subtitle: "Processing 45s of audio"
 
-#### Scenario B: Success (Cache Hit)
+#### Scenario D: Success (Cache Hit - FREE!)
 
 ```json
 {
@@ -90,8 +170,16 @@ X-Engine-Auth: <secret>
   "status": "completed",
   "phase": "COMPLETED",
   "progress": 100,
+  "message": "Transcription complete! 892 characters transcribed.",
   "cacheHit": true,
-  "note": "Retrieved from cache",
+  "estimatedCost": {
+    "audioDurationSeconds": 45.2,
+    "estimatedCharacters": 892,
+    "isCacheFree": true,
+    "billingNote": "This result was served from cache - no charge!"
+  },
+  "statusUrl": "https://iamromeoly-tttranscribe.hf.space/status/ttt-job-uuid",
+  "pollIntervalSeconds": 3,
   "completedAt": "2025-12-14T23:30:01.000Z",
   "result": {
     "transcription": "Full transcript text here...",
