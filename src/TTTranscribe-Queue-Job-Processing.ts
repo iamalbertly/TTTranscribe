@@ -23,12 +23,21 @@ export type Status = {
   note?: string;
   percent?: number;
   progress: number;
+  message: string; // User-friendly progressive message
   submittedAt: string;
   completedAt?: string;
   estimatedCompletion?: string;
   currentStep?: string;
   error?: string; // Error message when status is 'failed'
   cacheHit?: boolean; // Indicates if result was served from cache
+  estimatedCost?: { // Cost transparency
+    audioDurationSeconds: number;
+    estimatedCharacters: number;
+    isCacheFree: boolean;
+    billingNote: string;
+  };
+  statusUrl?: string; // URL to poll for updates
+  pollIntervalSeconds?: number; // Recommended poll interval
   result?: {
     transcription: string;
     confidence: number;
@@ -112,6 +121,49 @@ function mapPhaseToCurrentStep(phase: StatusPhase): string {
     case 'FAILED': return 'failed';
     default: return 'unknown';
   }
+}
+
+/**
+ * Progressive status messages that provide clear, actionable guidance to users
+ */
+const PROGRESSIVE_STATUS_MESSAGES: Record<StatusPhase, (metadata?: any) => string> = {
+  REQUEST_SUBMITTED: () => "Job queued, waiting for processing...",
+  DOWNLOADING: () => "Downloading video from TikTok... (this may take 10-30 seconds)",
+  TRANSCRIBING: (metadata?: any) => {
+    const duration = metadata?.audioDuration || metadata?.duration;
+    if (duration) {
+      return `Transcribing audio with Whisper AI... (processing ${Math.round(duration)}s of audio)`;
+    }
+    return "Transcribing audio with Whisper AI...";
+  },
+  SUMMARIZING: () => "Generating summary...",
+  COMPLETED: (metadata?: any) => {
+    const chars = metadata?.transcriptLength || metadata?.characterCount || 0;
+    return `Transcription complete! ${chars} characters transcribed.`;
+  },
+  FAILED: (metadata?: any) => {
+    const error = metadata?.error || 'Unknown error';
+    return `Transcription failed: ${error}. Please try again or contact support.`;
+  }
+};
+
+/**
+ * Generate cost estimate for transparency
+ */
+function generateCostEstimate(audioDuration: number, transcriptLength: number, cacheHit: boolean): {
+  audioDurationSeconds: number;
+  estimatedCharacters: number;
+  isCacheFree: boolean;
+  billingNote: string;
+} {
+  return {
+    audioDurationSeconds: Math.round(audioDuration * 100) / 100,
+    estimatedCharacters: transcriptLength,
+    isCacheFree: cacheHit,
+    billingNote: cacheHit
+      ? 'This result was served from cache - no charge!'
+      : `Estimated cost based on ${Math.round(audioDuration)}s of audio`
+  };
 }
 
 /**
@@ -206,6 +258,24 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
     estimatedCompletion
   }));
 
+  // Generate progressive message with metadata
+  const progressMetadata = {
+    audioDuration: result?.duration || metadata?.audioDuration,
+    transcriptLength: text?.length || result?.transcription?.length || 0,
+    characterCount: text?.length || result?.transcription?.length || 0,
+    duration: result?.duration || metadata?.audioDuration,
+    error: note
+  };
+  const progressiveMessage = note || PROGRESSIVE_STATUS_MESSAGES[phase]?.(progressMetadata) || phase;
+
+  // Generate cost estimate if we have duration information
+  let costEstimate: Status['estimatedCost'] | undefined;
+  const audioDuration = result?.duration || metadata?.audioDuration;
+  const transcriptLength = text?.length || result?.transcription?.length || 0;
+  if (audioDuration && transcriptLength) {
+    costEstimate = generateCostEstimate(audioDuration, transcriptLength, cacheHit || false);
+  }
+
   const status: Status = {
     id: requestId,
     status: mapPhaseToStatus(phase),
@@ -213,12 +283,16 @@ function updateStatus(requestId: string, phase: StatusPhase, percent: number, no
     note,
     percent,
     progress: percent,
+    message: progressiveMessage, // User-friendly progressive message
     submittedAt: jobRecord?.createdAt || now,
     completedAt: phase === 'COMPLETED' ? now : undefined,
     estimatedCompletion,
     currentStep: mapPhaseToCurrentStep(phase),
     error: phase === 'FAILED' ? note : undefined, // Include error message when failed
     cacheHit: cacheHit ?? undefined, // Indicate if result was served from cache
+    estimatedCost: costEstimate, // Cost transparency
+    statusUrl: config?.baseUrl ? `${config.baseUrl}/status/${requestId}` : undefined,
+    pollIntervalSeconds: 3, // Recommended poll interval
     result: phase === 'COMPLETED' && result ? {
       transcription: text || '',
       confidence: result.confidence || 0.95,

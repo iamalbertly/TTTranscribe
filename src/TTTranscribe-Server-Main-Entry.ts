@@ -5,7 +5,8 @@ import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Envi
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 import { isValidTikTokUrl } from './TTTranscribe-Media-TikTok-Download';
 import fetch from 'node-fetch';
-import { getWebhookQueueStats } from './TTTranscribe-Webhook-Business-Engine';
+import { getWebhookQueueStats, getFailedWebhooks, retryFailedWebhook } from './TTTranscribe-Webhook-Business-Engine';
+import jwt from 'jsonwebtoken';
 
 // Rate limiting implementation
 class TokenBucket {
@@ -75,6 +76,45 @@ function getBearerToken(authHeader?: string | null): string | null {
   if (!authHeader) return null;
   const match = authHeader.match(/Bearer (.+)/i);
   return match ? match[1].trim() : null;
+}
+
+/**
+ * JWT payload interface for type safety
+ */
+interface JwtPayload {
+  iss: string;  // issuer (pluct-business-engine)
+  sub: string;  // subject (requestId)
+  aud: string;  // audience (tttranscribe)
+  exp: number;  // expiration timestamp
+  iat: number;  // issued at timestamp
+}
+
+/**
+ * Validate JWT token and extract requestId
+ */
+function validateJwtAuth(token: string): { valid: boolean; requestId?: string; error?: string } {
+  try {
+    const jwtSecret = process.env.JWT_SECRET || process.env.SHARED_SECRET;
+    if (!jwtSecret) {
+      return { valid: false, error: 'JWT_SECRET not configured' };
+    }
+
+    const decoded = jwt.verify(token, jwtSecret, {
+      algorithms: ['HS256'],
+      audience: 'tttranscribe',
+      issuer: 'pluct-business-engine'
+    }) as JwtPayload;
+
+    return { valid: true, requestId: decoded.sub };
+  } catch (err: any) {
+    if (err.name === 'TokenExpiredError') {
+      return { valid: false, error: 'Token expired' };
+    }
+    if (err.name === 'JsonWebTokenError') {
+      return { valid: false, error: 'Invalid token' };
+    }
+    return { valid: false, error: err.message };
+  }
 }
 
 /**
@@ -154,62 +194,15 @@ function getClientIP(c: any): string {
 }
 
 /**
- * Authentication middleware
+ * Authentication middleware - supports both JWT and static secret
  */
 async function authMiddleware(c: any, next: any) {
-  // Skip authentication for health checks and root endpoint
-  if (c.req.path === '/health' || c.req.path === '/') {
+  // Skip authentication for health checks, root endpoint, and readiness
+  if (c.req.path === '/health' || c.req.path === '/' || c.req.path === '/ready') {
     await next();
     return;
   }
-  
-  // Never bypass authentication in production (Hugging Face Spaces)
-  if (config?.isHuggingFace) {
-    const authHeader = c.req.header('X-Engine-Auth') || getBearerToken(c.req.header('Authorization'));
-    const expectedSecret = config.engineSharedSecret;
-    const clientInfo = {
-      ip: getClientIP(c),
-      userAgent: c.req.header('User-Agent') || '',
-      clientVersion: c.req.header('X-Client-Version') || '',
-      clientPlatform: c.req.header('X-Client-Platform') || '',
-      path: c.req.path,
-      method: c.req.method
-    };
-    if (!authHeader || authHeader !== expectedSecret) {
-      console.error(JSON.stringify({
-        type: 'auth_error',
-        reason: 'missing_or_invalid_X-Engine-Auth',
-        provided: authHeader ? 'present' : 'missing',
-        expected: 'X-Engine-Auth header with valid secret',
-        ...clientInfo
-      }));
-      return c.json({
-        error: 'unauthorized',
-        message: 'Missing or invalid X-Engine-Auth header',
-        details: {
-          provided: authHeader ? 'present' : 'missing',
-          expected: 'X-Engine-Auth header with valid secret',
-          ...clientInfo
-        }
-      }, 401);
-    }
-    // Only log successful auth on first request or errors to reduce spam
-    await next();
-    return;
-  }
-  
-  // Only allow auth bypass in local development with explicit flag
-  const enableAuthBypass = (process.env.ENABLE_AUTH_BYPASS || 'false').toLowerCase() === 'true';
-  
-  // Only bypass auth in local development, never in production
-  if (config?.isLocal && enableAuthBypass && !config?.isHuggingFace) {
-    console.log(`Local development mode: bypassing authentication for ${getClientIP(c)}`);
-    await next();
-    return;
-  }
-  
-  const authHeader = c.req.header('X-Engine-Auth') || getBearerToken(c.req.header('Authorization'));
-  const expectedSecret = config?.engineSharedSecret;
+
   const clientInfo = {
     ip: getClientIP(c),
     userAgent: c.req.header('User-Agent') || '',
@@ -218,25 +211,73 @@ async function authMiddleware(c: any, next: any) {
     path: c.req.path,
     method: c.req.method
   };
-  if (!authHeader || authHeader !== expectedSecret) {
+
+  // Only allow auth bypass in local development with explicit flag
+  const enableAuthBypass = (process.env.ENABLE_AUTH_BYPASS || 'false').toLowerCase() === 'true';
+  if (config?.isLocal && enableAuthBypass && !config?.isHuggingFace) {
+    console.log(`Local development mode: bypassing authentication for ${getClientIP(c)}`);
+    await next();
+    return;
+  }
+
+  // Try to get auth token from Authorization header or X-Engine-Auth header
+  const authorizationHeader = c.req.header('Authorization');
+  const xEngineAuthHeader = c.req.header('X-Engine-Auth');
+  const token = getBearerToken(authorizationHeader) || xEngineAuthHeader;
+
+  if (!token) {
     console.error(JSON.stringify({
       type: 'auth_error',
-      reason: 'missing_or_invalid_X-Engine-Auth',
-      provided: authHeader ? 'present' : 'missing',
-      expected: 'X-Engine-Auth header with valid secret',
+      reason: 'missing_authorization_header',
+      expected: 'Authorization: Bearer <JWT> or X-Engine-Auth: <SECRET>',
       ...clientInfo
     }));
     return c.json({
       error: 'unauthorized',
-      message: 'Missing or invalid X-Engine-Auth header',
+      message: 'Missing Authorization header',
       details: {
-        provided: authHeader ? 'present' : 'missing',
-        expected: 'X-Engine-Auth header with valid secret',
+        expected: 'Authorization: Bearer <JWT> or X-Engine-Auth: <SECRET>',
         ...clientInfo
       }
     }, 401);
   }
-  await next();
+
+  // Try JWT validation first
+  const jwtResult = validateJwtAuth(token);
+  if (jwtResult.valid) {
+    c.set('requestId', jwtResult.requestId);
+    c.set('authMethod', 'jwt');
+    console.log(`[auth] JWT authenticated: requestId=${jwtResult.requestId}`);
+    await next();
+    return;
+  }
+
+  // Fallback to static secret (backward compatibility)
+  const expectedSecret = config?.engineSharedSecret;
+  if (token === expectedSecret) {
+    c.set('authMethod', 'static-secret');
+    console.log(`[auth] Static secret authenticated`);
+    await next();
+    return;
+  }
+
+  // Both methods failed - return detailed error
+  console.error(JSON.stringify({
+    type: 'auth_error',
+    reason: 'invalid_token_or_secret',
+    jwtError: jwtResult.error,
+    ...clientInfo
+  }));
+
+  return c.json({
+    error: 'unauthorized',
+    message: 'Invalid authentication token',
+    details: {
+      jwtError: jwtResult.error || 'Invalid JWT token',
+      hint: 'Use JWT token (recommended) or static secret',
+      ...clientInfo
+    }
+  }, 401);
 }
 
 /**
@@ -656,6 +697,53 @@ app.get('/ready', async (c) => {
     return c.json({ ready: false, reason: readiness.message, missing: readiness.missing }, 503);
   }
   return c.json({ ready: true, checkedAt: readiness.checkedAt });
+});
+
+/**
+ * GET /admin/webhook-queue
+ * Returns list of failed webhooks for visibility
+ */
+app.get('/admin/webhook-queue', authMiddleware, async (c) => {
+  const failedWebhooks = getFailedWebhooks();
+  return c.json({
+    failed: failedWebhooks.map(w => ({
+      jobId: w.payload.jobId,
+      url: w.primaryUrl,
+      attempts: w.attempts,
+      lastError: w.lastError,
+      timestamp: w.timestamp,
+      canRetry: true
+    })),
+    totalFailed: failedWebhooks.length
+  });
+});
+
+/**
+ * POST /admin/retry-webhook/:jobId
+ * Manually retry a failed webhook (for admin/support)
+ */
+app.post('/admin/retry-webhook/:jobId', authMiddleware, async (c) => {
+  const jobId = c.req.param('jobId');
+
+  if (!jobId) {
+    return c.json({ error: 'Missing job ID parameter' }, 400);
+  }
+
+  const success = await retryFailedWebhook(jobId);
+
+  if (success) {
+    return c.json({
+      success: true,
+      message: `Webhook for job ${jobId} delivered successfully`,
+      jobId
+    });
+  } else {
+    return c.json({
+      success: false,
+      message: `Webhook for job ${jobId} delivery failed again`,
+      jobId
+    }, 500);
+  }
 });
 
 // Error handling
