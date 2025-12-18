@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import * as crypto from 'crypto';
+import * as https from 'https';
 
 /**
  * Webhook payload sent to Business Engine when job completes or fails
@@ -60,8 +61,10 @@ function startRetryLoop() {
       return;
     }
 
-    const fallbacks = job.fallbackUrl ? [job.fallbackUrl] : [];
-    const success = await deliverWebhook(job.payload, job.primaryUrl, fallbacks);
+    const fallbackIps = job.primaryUrl.includes('workers.dev')
+      ? ['104.21.37.242', '172.67.215.133']
+      : [];
+    const success = await deliverWebhook(job.payload, job.primaryUrl, fallbackIps);
     if (!success) {
       job.attempts += 1;
       if (job.attempts < MAX_TOTAL_ATTEMPTS) {
@@ -79,6 +82,15 @@ export function getWebhookQueueStats() {
     pending: failedWebhookQueue.length,
     retryIntervalSeconds: 30,
   };
+}
+
+function buildHttpsAgentForIp(targetHost: string, ip: string) {
+  return new https.Agent({
+    lookup: (hostname: string, opts: any, cb: any) => {
+      cb(null, ip, 4);
+    },
+    servername: targetHost
+  });
 }
 
 /**
@@ -135,28 +147,18 @@ export async function sendWebhookToBusinessEngine(
   console.log(`[webhook] Idempotency key: ${idempotencyKey}`);
   console.log(`[webhook] Usage: ${payload.usage.audioDurationSeconds}s audio, ${payload.usage.transcriptCharacters} chars`);
 
-  // Derive fallback URLs for DNS issues
-  // Try: main domain -> workers.dev without subdomain -> direct IP
-  const fallbacks: string[] = [];
-
-  if (webhookUrl.includes('romeo-lya2.')) {
-    fallbacks.push(webhookUrl.replace('romeo-lya2.', ''));
-  }
-
-  // Add IP-based fallback for Cloudflare Workers (resolves DNS issues in HF Spaces)
+  const fallbackIps: string[] = [];
   if (webhookUrl.includes('workers.dev')) {
-    // Cloudflare anycast IPs - these are stable
-    fallbacks.push(webhookUrl.replace(/https:\/\/[^\/]+/, 'https://104.21.37.242'));
-    fallbacks.push(webhookUrl.replace(/https:\/\/[^\/]+/, 'https://172.67.215.133'));
+    // Cloudflare anycast IPs - stable for workers.dev
+    fallbackIps.push('104.21.37.242');
+    fallbackIps.push('172.67.215.133');
   }
 
-  const fallbackUrl = process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL || fallbacks[0];
-
-  const success = await deliverWebhook(signedPayload, webhookUrl, fallbacks);
+  const success = await deliverWebhook(signedPayload, webhookUrl, fallbackIps);
   if (!success) {
     failedWebhookQueue.push({
       primaryUrl: webhookUrl,
-      fallbackUrl: fallbacks[0],
+      fallbackUrl: process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL,
       payload: signedPayload,
       attempts: 0,
       lastError: 'exhausted immediate retries'
@@ -171,7 +173,7 @@ export async function sendWebhookToBusinessEngine(
 async function deliverWebhook(
   signedPayload: WebhookPayload,
   webhookUrl: string,
-  fallbackUrls?: string[]
+  fallbackIps?: string[]
 ): Promise<boolean> {
   let attempt = 0;
   let lastError: Error | null = null;
@@ -219,6 +221,11 @@ async function deliverWebhook(
       } else {
         console.warn(`[webhook] Webhook request failed (attempt ${attempt + 1}/${WEBHOOK_CONFIG.maxRetries}): ${error.message}`);
         lastError = error;
+        if (error.code === 'ENOTFOUND' && fallbackIps && fallbackIps.length > 0) {
+          // Skip remaining retries and move to IP fallbacks immediately
+          attempt = WEBHOOK_CONFIG.maxRetries;
+          break;
+        }
       }
     }
 
@@ -235,46 +242,44 @@ async function deliverWebhook(
     }
   }
 
-  // Try all fallback URLs
-  if (fallbackUrls && fallbackUrls.length > 0) {
-    for (let i = 0; i < fallbackUrls.length; i++) {
-      const fallbackUrl = fallbackUrls[i];
-      console.warn(`[webhook] Primary failed for job ${signedPayload.jobId}. Trying fallback ${i + 1}/${fallbackUrls.length}: ${fallbackUrl.substring(0, 60)}...`);
+  // Try all fallback IPs with SNI preserved (avoids DNS failures in HF)
+  if (fallbackIps && fallbackIps.length > 0) {
+    const targetHost = new URL(webhookUrl).host;
+    for (let i = 0; i < fallbackIps.length; i++) {
+      const ip = fallbackIps[i];
+      console.warn(`[webhook] Primary failed for job ${signedPayload.jobId}. Trying fallback IP ${i + 1}/${fallbackIps.length}: ${ip}`);
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_CONFIG.timeoutMs);
 
-        // For IP-based fallbacks, add Host header to preserve routing
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           'X-TTTranscribe-Signature': signedPayload.signature,
           'X-Idempotency-Key': signedPayload.idempotencyKey,
         };
 
-        // Extract original host for IP-based fallbacks
-        if (fallbackUrl.match(/^https?:\/\/\d+\.\d+\.\d+\.\d+/)) {
-          const originalHost = new URL(webhookUrl).host;
-          headers['Host'] = originalHost;
-        }
+        const agent = buildHttpsAgentForIp(targetHost, ip);
+        headers['Host'] = targetHost;
 
-        const response = await fetch(fallbackUrl, {
+        const response = await fetch(webhookUrl, {
           method: 'POST',
           headers,
           body: JSON.stringify(signedPayload),
           signal: controller.signal,
+          agent
         });
         clearTimeout(timeoutId);
 
         if (response.ok || response.status === 409) {
-          console.log(`[webhook] Fallback ${i + 1} succeeded for job ${signedPayload.jobId}`);
+          console.log(`[webhook] Fallback IP ${i + 1} succeeded for job ${signedPayload.jobId}`);
           return true;
         }
 
         const responseText = await response.text().catch(() => 'Unable to read response');
-        console.warn(`[webhook] Fallback ${i + 1} failed: ${response.status} - ${responseText.substring(0, 100)}`);
-        lastError = new Error(`Fallback ${i + 1} HTTP ${response.status}`);
+        console.warn(`[webhook] Fallback IP ${i + 1} failed: ${response.status} - ${responseText.substring(0, 100)}`);
+        lastError = new Error(`Fallback IP ${i + 1} HTTP ${response.status}`);
       } catch (fallbackErr: any) {
-        console.warn(`[webhook] Fallback ${i + 1} threw: ${fallbackErr.message}`);
+        console.warn(`[webhook] Fallback IP ${i + 1} threw: ${fallbackErr.message}`);
         lastError = fallbackErr;
       }
     }
