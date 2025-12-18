@@ -80,8 +80,23 @@ export async function download(url: string): Promise<string> {
 
 async function resolveCanonicalUrl(url: string): Promise<string> {
   try {
+    // Try HEAD manual first to capture redirect location quickly
+    try {
+      const headResp = await fetch(url, {
+        method: 'HEAD',
+        redirect: 'manual',
+        headers: { 'User-Agent': DEFAULT_UA, 'Referer': DEFAULT_REFERER }
+      });
+      const location = headResp.headers.get('location');
+      if (location) {
+        return location.split('#')[0].split('?')[0];
+      }
+    } catch {
+      // Ignore and fall back to GET
+    }
+
     // Follow redirects to get canonical URL (vm.tiktok.com -> long form)
-    const response = await fetch(url, { 
+    const response = await fetch(url, {
       method: 'GET',
       redirect: 'follow',
       headers: {
@@ -196,11 +211,14 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
     const baseArgs = [
       '-x',
       '--audio-format wav',
+      '--no-playlist',
+      '--geo-bypass',
       `--user-agent "${DEFAULT_UA}"`,
       `--referer "${DEFAULT_REFERER}"`,
     ];
 
-    const impersonate = process.env.YTDLP_IMPERSONATE;
+    // Prefer explicit impersonation if provided, otherwise default to chrome on HF
+    const impersonate = process.env.YTDLP_IMPERSONATE || (isHuggingFace ? 'chrome' : '');
     if (impersonate) {
       baseArgs.push(`--impersonate ${impersonate}`);
     }
@@ -224,25 +242,32 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
       return;
     }
 
-    // Try downloading with each yt-dlp path until one succeeds
+    // Try downloading with each yt-dlp path and argument variant until one succeeds
     let lastError: Error | null = null;
+    const argVariants: string[][] = [
+      baseArgs,
+      [...baseArgs, '--force-ipv4'],
+      [...baseArgs, '--extractor-args "tiktok:app_version=34.1.2;device_platform=android"']
+    ];
     for (const ytdlpCommand of ytdlpPaths) {
-      try {
-        const command = `${ytdlpCommand} ${baseArgs.join(' ')} --output "${outputPath}" "${url}"`;
-        console.log(`[download] Attempting with: ${ytdlpCommand}`);
-        const { stdout, stderr } = await execAsync(command);
+      for (const args of argVariants) {
+        try {
+          const command = `${ytdlpCommand} ${args.join(' ')} --output "${outputPath}" "${url}"`;
+          console.log(`[download] Attempting with: ${ytdlpCommand} args=${args.join(' ')}`);
+          await execAsync(command);
 
-        // Success - verify file and return
-        const stats = await fs.promises.stat(outputPath);
-        if (stats.size === 0) {
-          throw new Error('Downloaded file is empty');
+          // Success - verify file and return
+          const stats = await fs.promises.stat(outputPath);
+          if (stats.size === 0) {
+            throw new Error('Downloaded file is empty');
+          }
+          console.log(`[download] Success: ${outputPath} (${stats.size} bytes)`);
+          return; // Success, exit function
+        } catch (error: any) {
+          lastError = error;
+          console.log(`[download] Failed with ${ytdlpCommand} args=${args.join(' ')}`);
+          // Continue to next arg variant
         }
-        console.log(`[download] Success: ${outputPath} (${stats.size} bytes)`);
-        return; // Success, exit function
-      } catch (error: any) {
-        lastError = error;
-        console.log(`[download] Failed with ${ytdlpCommand}`);
-        // Continue to next path
       }
     }
 

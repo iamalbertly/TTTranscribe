@@ -52,10 +52,24 @@ function startRetryLoop() {
     if (failedWebhookQueue.length === 0) return;
     const job = failedWebhookQueue.shift();
     if (!job) return;
-    const success = await deliverWebhook(job.payload, job.primaryUrl, job.fallbackUrl);
-    if (!success && job.attempts < WEBHOOK_CONFIG.maxRetries * 3) {
+
+    // Cap total attempts to prevent infinite loops
+    const MAX_TOTAL_ATTEMPTS = 10;
+    if (job.attempts >= MAX_TOTAL_ATTEMPTS) {
+      console.error(`[webhook] Job ${job.payload.jobId} exceeded max retry attempts (${MAX_TOTAL_ATTEMPTS}), dropping from queue`);
+      return;
+    }
+
+    const fallbacks = job.fallbackUrl ? [job.fallbackUrl] : [];
+    const success = await deliverWebhook(job.payload, job.primaryUrl, fallbacks);
+    if (!success) {
       job.attempts += 1;
-      failedWebhookQueue.push(job);
+      if (job.attempts < MAX_TOTAL_ATTEMPTS) {
+        failedWebhookQueue.push(job);
+        console.log(`[webhook] Job ${job.payload.jobId} requeued for retry (attempt ${job.attempts}/${MAX_TOTAL_ATTEMPTS})`);
+      } else {
+        console.error(`[webhook] Job ${job.payload.jobId} permanently failed after ${MAX_TOTAL_ATTEMPTS} attempts`);
+      }
     }
   }, 30000);
 }
@@ -121,17 +135,28 @@ export async function sendWebhookToBusinessEngine(
   console.log(`[webhook] Idempotency key: ${idempotencyKey}`);
   console.log(`[webhook] Usage: ${payload.usage.audioDurationSeconds}s audio, ${payload.usage.transcriptCharacters} chars`);
 
-  // Derive a sensible fallback if the primary endpoint is unreachable (DNS issues on regional host).
-  const derivedFallback = webhookUrl.includes('romeo-lya2.')
-    ? webhookUrl.replace('romeo-lya2.', '')
-    : undefined;
-  const fallbackUrl = process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL || derivedFallback;
+  // Derive fallback URLs for DNS issues
+  // Try: main domain -> workers.dev without subdomain -> direct IP
+  const fallbacks: string[] = [];
 
-  const success = await deliverWebhook(signedPayload, webhookUrl, fallbackUrl);
+  if (webhookUrl.includes('romeo-lya2.')) {
+    fallbacks.push(webhookUrl.replace('romeo-lya2.', ''));
+  }
+
+  // Add IP-based fallback for Cloudflare Workers (resolves DNS issues in HF Spaces)
+  if (webhookUrl.includes('workers.dev')) {
+    // Cloudflare anycast IPs - these are stable
+    fallbacks.push(webhookUrl.replace(/https:\/\/[^\/]+/, 'https://104.21.37.242'));
+    fallbacks.push(webhookUrl.replace(/https:\/\/[^\/]+/, 'https://172.67.215.133'));
+  }
+
+  const fallbackUrl = process.env.BUSINESS_ENGINE_WEBHOOK_FALLBACK_URL || fallbacks[0];
+
+  const success = await deliverWebhook(signedPayload, webhookUrl, fallbacks);
   if (!success) {
     failedWebhookQueue.push({
       primaryUrl: webhookUrl,
-      fallbackUrl,
+      fallbackUrl: fallbacks[0],
       payload: signedPayload,
       attempts: 0,
       lastError: 'exhausted immediate retries'
@@ -146,7 +171,7 @@ export async function sendWebhookToBusinessEngine(
 async function deliverWebhook(
   signedPayload: WebhookPayload,
   webhookUrl: string,
-  fallbackUrl?: string
+  fallbackUrls?: string[]
 ): Promise<boolean> {
   let attempt = 0;
   let lastError: Error | null = null;
@@ -210,32 +235,48 @@ async function deliverWebhook(
     }
   }
 
-  if (fallbackUrl) {
-    console.warn(`[webhook] Primary webhook URL failed for job ${signedPayload.jobId}. Attempting fallback URL ${fallbackUrl}`);
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_CONFIG.timeoutMs);
-      const response = await fetch(fallbackUrl, {
-        method: 'POST',
-        headers: {
+  // Try all fallback URLs
+  if (fallbackUrls && fallbackUrls.length > 0) {
+    for (let i = 0; i < fallbackUrls.length; i++) {
+      const fallbackUrl = fallbackUrls[i];
+      console.warn(`[webhook] Primary failed for job ${signedPayload.jobId}. Trying fallback ${i + 1}/${fallbackUrls.length}: ${fallbackUrl.substring(0, 60)}...`);
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_CONFIG.timeoutMs);
+
+        // For IP-based fallbacks, add Host header to preserve routing
+        const headers: Record<string, string> = {
           'Content-Type': 'application/json',
           'X-TTTranscribe-Signature': signedPayload.signature,
           'X-Idempotency-Key': signedPayload.idempotencyKey,
-        },
-        body: JSON.stringify(signedPayload),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (response.ok || response.status === 409) {
-        console.log(`[webhook] Fallback webhook succeeded for job ${signedPayload.jobId}`);
-        return true;
+        };
+
+        // Extract original host for IP-based fallbacks
+        if (fallbackUrl.match(/^https?:\/\/\d+\.\d+\.\d+\.\d+/)) {
+          const originalHost = new URL(webhookUrl).host;
+          headers['Host'] = originalHost;
+        }
+
+        const response = await fetch(fallbackUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(signedPayload),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok || response.status === 409) {
+          console.log(`[webhook] Fallback ${i + 1} succeeded for job ${signedPayload.jobId}`);
+          return true;
+        }
+
+        const responseText = await response.text().catch(() => 'Unable to read response');
+        console.warn(`[webhook] Fallback ${i + 1} failed: ${response.status} - ${responseText.substring(0, 100)}`);
+        lastError = new Error(`Fallback ${i + 1} HTTP ${response.status}`);
+      } catch (fallbackErr: any) {
+        console.warn(`[webhook] Fallback ${i + 1} threw: ${fallbackErr.message}`);
+        lastError = fallbackErr;
       }
-      const responseText = await response.text().catch(() => 'Unable to read response');
-      console.warn(`[webhook] Fallback webhook failed: ${response.status} ${response.statusText} - ${responseText.substring(0, 150)}`);
-      lastError = new Error(`Fallback HTTP ${response.status}`);
-    } catch (fallbackErr: any) {
-      console.warn(`[webhook] Fallback webhook threw: ${fallbackErr.message}`);
-      lastError = fallbackErr;
     }
   }
 

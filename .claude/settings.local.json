@@ -22,7 +22,9 @@
       "Bash(npm info:*)",
       "Bash(node -e:*)",
       "Bash(python3:*)",
-      "Bash(node test-deployment-validation.js:*)"
+      "Bash(node test-deployment-validation.js:*)",
+      "Bash(BASE_URL=\"https://iamromeoly-tttranscribe.hf.space\" node -e:*)",
+      "Bash(nslookup:*)"
     ],
     "deny": [],
     "ask": []
