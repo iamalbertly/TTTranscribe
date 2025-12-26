@@ -31,6 +31,54 @@ const allowPlaceholderDownload = (process.env.ALLOW_PLACEHOLDER_DOWNLOAD || (isH
 const DEFAULT_UA = process.env.YTDLP_USER_AGENT ||
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36';
 const DEFAULT_REFERER = process.env.YTDLP_REFERER || 'https://www.tiktok.com/';
+const INLINE_COOKIES = process.env.YTDLP_COOKIES_CONTENT;
+const COOKIE_FILE = process.env.YTDLP_COOKIES_FILE || process.env.YTDLP_COOKIES;
+const COOKIE_HEADER = process.env.YTDLP_COOKIE_HEADER;
+const EXTRA_HEADERS_JSON = process.env.YTDLP_TIKTOK_HEADERS_JSON;
+const CUSTOM_EXTRACTOR_ARGS = process.env.YTDLP_TIKTOK_EXTRACTOR_ARGS;
+
+function buildHeaderArgs(): string[] {
+  const args: string[] = [];
+
+  // Simple cookie header pass-through (useful when session cookies are provided)
+  if (COOKIE_HEADER) {
+    args.push(`--add-header "Cookie: ${COOKIE_HEADER}"`);
+  }
+
+  // Arbitrary header map in JSON form: {"Cookie":"foo=bar","User-Agent":"..."}
+  if (EXTRA_HEADERS_JSON) {
+    try {
+      const parsed = JSON.parse(EXTRA_HEADERS_JSON) as Record<string, string>;
+      Object.entries(parsed).forEach(([key, value]) => {
+        args.push(`--add-header "${key}: ${value}"`);
+      });
+    } catch (err) {
+      console.warn('[download] Invalid YTDLP_TIKTOK_HEADERS_JSON - must be JSON object of string:string');
+    }
+  }
+
+  return args;
+}
+
+async function prepareCookieFile(): Promise<string | undefined> {
+  // If a file path is provided, use it directly
+  if (COOKIE_FILE) {
+    return COOKIE_FILE;
+  }
+
+  // If inline cookies are provided, materialize them into a temp file
+  if (INLINE_COOKIES) {
+    try {
+      const cookiePath = path.join(TMP_DIR, 'yt_dlp_cookies.txt');
+      await fs.writeFile(cookiePath, INLINE_COOKIES, 'utf8');
+      return cookiePath;
+    } catch (err) {
+      console.warn('[download] Failed to write inline cookie jar:', err);
+    }
+  }
+
+  return undefined;
+}
 
 /**
  * TikTok media resolver
@@ -228,9 +276,14 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
       baseArgs.push(`--proxy ${proxy}`);
     }
 
-    const cookies = process.env.YTDLP_COOKIES;
-    if (cookies) {
-      baseArgs.push(`--cookies "${cookies}"`);
+    const headerArgs = buildHeaderArgs();
+    if (headerArgs.length) {
+      baseArgs.push(...headerArgs);
+    }
+
+    const cookieFile = await prepareCookieFile();
+    if (cookieFile) {
+      baseArgs.push(`--cookies "${cookieFile}"`);
     }
 
     // For local development on Windows, skip yt-dlp and use placeholder
@@ -244,7 +297,12 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
 
     // Try downloading with each yt-dlp path and argument variant until one succeeds
     let lastError: Error | null = null;
+    const extractorVariant = CUSTOM_EXTRACTOR_ARGS
+      ? [`--extractor-args "${CUSTOM_EXTRACTOR_ARGS}"`]
+      : [];
+
     const argVariants: string[][] = [
+      [...baseArgs, ...extractorVariant],
       baseArgs,
       [...baseArgs, '--force-ipv4'],
       [...baseArgs, '--extractor-args "tiktok:app_version=34.1.2;device_platform=android"']
