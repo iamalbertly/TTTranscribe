@@ -11,6 +11,11 @@
     "test:contract": "node test-contract.js",
     "test:start": "node start-test.js",
     "test:all": "npm test",
+    "test:ux": "node TTTranscribe-Test-01UXImprovements-01MasterRunner.js",
+    "test:ux:dev": "set NODE_ENV=development&& set FAIL_FAST=true&& node TTTranscribe-Test-01UXImprovements-01MasterRunner.js",
+    "test:metadata": "set FAIL_FAST=true&& node TTTranscribe-Test-01UXImprovements-02MetadataExtraction.js",
+    "test:progress": "set FAIL_FAST=true&& node TTTranscribe-Test-01UXImprovements-03ProgressUpdates.js",
+    "test:cache": "set FAIL_FAST=true&& node TTTranscribe-Test-01UXImprovements-04CachePerformance.js",
     "test:e2e": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-Test-Runner.ps1 -Scenario QuickTest",
     "test:e2e:full": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-Test-Runner.ps1 -Scenario FullTest",
     "test:orchestrator": "powershell -ExecutionPolicy Bypass -File scripts/TTTranscribe-E2E-Test-Orchestrator.ps1"
