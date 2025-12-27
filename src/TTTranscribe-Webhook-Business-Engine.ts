@@ -1,3 +1,4 @@
+
 import fetch from 'node-fetch';
 import * as crypto from 'crypto';
 
@@ -41,6 +42,7 @@ type QueuedWebhook = {
   attempts: number;
   lastError?: string;
   timestamp: string;
+  lastStatus?: number;
 };
 
 const failedWebhookQueue: QueuedWebhook[] = [];
@@ -56,6 +58,19 @@ export function getFailedWebhooks(): QueuedWebhook[] {
   return failedWebhookQueue;
 }
 
+/**
+ * Basic webhook URL validation to catch config typos early.
+ */
+function isValidWebhookUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * Generate HMAC signature for webhook payload
@@ -78,13 +93,18 @@ function generateSignature(payload: Omit<WebhookPayload, 'signature'>, secret: s
 }
 
 /**
- * Send webhook to Business Engine - single attempt delivery (simplified)
+ * Send webhook to Business Engine with a single retry for transient errors.
  */
 export async function sendWebhookToBusinessEngine(
   webhookUrl: string,
   payload: Omit<WebhookPayload, 'signature' | 'idempotencyKey'>,
   secret?: string
 ): Promise<boolean> {
+  if (!isValidWebhookUrl(webhookUrl)) {
+    console.error(`[webhook] Invalid webhook URL configured: ${webhookUrl}`);
+    return false;
+  }
+
   const webhookSecret = secret || process.env.BUSINESS_ENGINE_WEBHOOK_SECRET || process.env.SHARED_SECRET || '';
 
   if (!webhookSecret) {
@@ -111,57 +131,74 @@ export async function sendWebhookToBusinessEngine(
   console.log(`[webhook] Idempotency key: ${idempotencyKey}`);
   console.log(`[webhook] Usage: ${payload.usage.audioDurationSeconds}s audio, ${payload.usage.transcriptCharacters} chars`);
 
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-TTTranscribe-Signature': signedPayload.signature,
-        'X-Idempotency-Key': signedPayload.idempotencyKey,
-      },
-      body: JSON.stringify(signedPayload),
-      signal: AbortSignal.timeout(10000), // 10s timeout
-    });
+  const postWebhookOnce = async (): Promise<{ ok: boolean; status?: number; responseText?: string; errorMessage?: string }> => {
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-TTTranscribe-Signature': signedPayload.signature,
+          'X-Idempotency-Key': signedPayload.idempotencyKey,
+          'User-Agent': 'TTTranscribe/1.0 webhook',
+        },
+        body: JSON.stringify(signedPayload),
+        signal: AbortSignal.timeout(WEBHOOK_CONFIG.timeoutMs),
+      });
 
-    if (response.ok) {
-      console.log(`[webhook] Successfully delivered for job ${payload.jobId}`);
+      const responseText = await response.text().catch(() => 'Unable to read response');
+      return { ok: response.ok || response.status === 409, status: response.status, responseText };
+    } catch (error: any) {
+      return { ok: false, errorMessage: error?.message || 'Unknown fetch error' };
+    }
+  };
+
+  const firstAttempt = await postWebhookOnce();
+
+  if (firstAttempt.ok) {
+    console.log(`[webhook] Successfully delivered for job ${payload.jobId}`);
+    return true;
+  }
+
+  const shouldRetry =
+    (firstAttempt.status && (firstAttempt.status >= 500 || firstAttempt.status === 429)) ||
+    !!firstAttempt.errorMessage;
+
+  if (shouldRetry) {
+    console.warn(`[webhook] First attempt failed (status=${firstAttempt.status || 'n/a'}). Retrying once...`);
+    await delay(Math.min(WEBHOOK_CONFIG.initialBackoffMs, 2000));
+    const secondAttempt = await postWebhookOnce();
+    if (secondAttempt.ok) {
+      console.log(`[webhook] Retry succeeded for job ${payload.jobId}`);
       return true;
     }
-
-    if (response.status === 409) {
-      console.log(`[webhook] Webhook for job ${payload.jobId} already processed (409 Conflict)`);
-      return true;
-    }
-
-    const responseText = await response.text().catch(() => 'Unable to read response');
-    console.warn(`[webhook] Failed to deliver: ${response.status} ${response.statusText}`);
-    console.warn(`[webhook] Response: ${responseText.substring(0, 200)}`);
+    const errMsg = secondAttempt.errorMessage || `HTTP ${secondAttempt.status}: ${secondAttempt.responseText?.substring(0, 100) || 'unknown error'}`;
+    console.warn(`[webhook] Retry failed: ${errMsg}`);
     console.warn(`[webhook] Client should poll /status/${payload.jobId} instead`);
-
-    // Add to failed queue for visibility
     failedWebhookQueue.push({
       primaryUrl: webhookUrl,
       payload: signedPayload,
-      attempts: 1,
-      lastError: `HTTP ${response.status}: ${responseText.substring(0, 100)}`,
+      attempts: 2,
+      lastError: errMsg,
+      lastStatus: secondAttempt.status,
       timestamp: new Date().toISOString()
     });
-
-    return false;
-  } catch (error: any) {
-    console.warn(`[webhook] Failed to deliver: ${error.message}`);
-    console.warn(`[webhook] Client should poll /status/${payload.jobId} instead`);
-
-    failedWebhookQueue.push({
-      primaryUrl: webhookUrl,
-      payload: signedPayload,
-      attempts: 1,
-      lastError: error.message,
-      timestamp: new Date().toISOString()
-    });
-
     return false;
   }
+
+  const responseText = firstAttempt.responseText || firstAttempt.errorMessage || 'unknown error';
+  console.warn(`[webhook] Failed to deliver: ${responseText.substring(0, 200)}`);
+  console.warn(`[webhook] Client should poll /status/${payload.jobId} instead`);
+
+  failedWebhookQueue.push({
+    primaryUrl: webhookUrl,
+    payload: signedPayload,
+    attempts: 1,
+    lastError: responseText.substring(0, 100),
+    lastStatus: firstAttempt.status,
+    timestamp: new Date().toISOString()
+  });
+
+  return false;
 }
 
 /**
@@ -200,6 +237,7 @@ export async function retryFailedWebhook(jobId: string): Promise<boolean> {
     webhook.attempts += 1;
     webhook.lastError = `HTTP ${response.status}: ${responseText.substring(0, 100)}`;
     webhook.timestamp = new Date().toISOString();
+    webhook.lastStatus = response.status;
     return false;
   } catch (error: any) {
     console.warn(`[webhook] Manual retry failed for job ${jobId}: ${error.message}`);

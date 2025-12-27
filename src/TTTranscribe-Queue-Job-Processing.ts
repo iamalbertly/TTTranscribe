@@ -382,11 +382,11 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  // Check cache first
+  // Check cache first - INSTANT response for speed
   const cached = jobResultCache.get(normalizedUrl);
   if (cached) {
     const cachedTextLength = cached.result.transcription?.length || 0;
-    console.log(`Cache hit for ${normalizedUrl}, returning cached result immediately. Text length: ${cachedTextLength}`);
+    console.log(`[cache] ⚡ INSTANT HIT for ${normalizedUrl} - ${cachedTextLength} chars`);
 
     // Create job record for cached result
     const jobRecord: JobRecord = {
@@ -456,23 +456,31 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
     let richMetadata: TikTokMetadata | null = null;
 
     try {
-      // Phase 0: Extract metadata (non-blocking, before download)
-      // This runs in parallel with early status updates and doesn't delay processing
-      try {
-        console.log(`[metadata] Extracting metadata for ${normalizedUrl}`);
-        richMetadata = await extractTikTokMetadata(normalizedUrl);
-        console.log(`[metadata] Successfully extracted: ${richMetadata.title} by ${richMetadata.author}`);
-      } catch (metadataError: any) {
-        console.warn(`[metadata] Failed to extract metadata: ${metadataError.message} - continuing with generic metadata`);
-        // Continue processing even if metadata extraction fails
-      }
+      // Phase 0: Quick start - immediately show progress to create speed illusion
+      updateStatus(id, 'DOWNLOADING', 5, 'Preparing download...');
 
-      // Phase 1: Downloading
-      updateStatus(id, 'DOWNLOADING', 15, 'Downloading audio');
+      // Phase 0.5: Extract metadata in parallel with download preparation
+      const metadataPromise = (async () => {
+        try {
+          console.log(`[metadata] Extracting metadata for ${normalizedUrl}`);
+          const meta = await extractTikTokMetadata(normalizedUrl);
+          console.log(`[metadata] Successfully extracted: ${meta.title} by ${meta.author}`);
+          return meta;
+        } catch (metadataError: any) {
+          console.warn(`[metadata] Failed to extract metadata: ${metadataError.message} - continuing with generic metadata`);
+          return null;
+        }
+      })();
+
+      // Phase 1: Downloading - start immediately (parallel with metadata)
+      updateStatus(id, 'DOWNLOADING', 10, 'Downloading audio...');
 
       let wavPath: string;
       try {
         wavPath = await download(normalizedUrl);
+        // Wait for metadata to complete (should be done by now since download takes longer)
+        richMetadata = await metadataPromise;
+        updateStatus(id, 'DOWNLOADING', 30, 'Audio downloaded successfully');
       } catch (downloadError: any) {
         const errMsg = downloadError.message || String(downloadError);
         const errCode = downloadError.code || 'download_unknown';
@@ -512,10 +520,14 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       }
 
       // Phase 2: Transcribing
-      updateStatus(id, 'TRANSCRIBING', 35, 'Transcribing audio');
+      updateStatus(id, 'TRANSCRIBING', 40, 'Starting transcription...');
 
       let rawText: string;
       try {
+        // Show incremental progress during transcription
+        setTimeout(() => updateStatus(id, 'TRANSCRIBING', 55, 'Transcribing audio...'), 2000);
+        setTimeout(() => updateStatus(id, 'TRANSCRIBING', 70, 'Finalizing transcription...'), 5000);
+
         rawText = await transcribe(wavPath);
         // Check if transcription failed or returned a placeholder marker
         const normalized = (rawText || '').toString();
@@ -593,7 +605,7 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
       const { text, truncated } = truncateTextIfNeeded(rawText, maxLength);
 
       // Phase 3: Summarizing
-      updateStatus(id, 'SUMMARIZING', 75, 'Generating summary', text, truncated);
+      updateStatus(id, 'SUMMARIZING', 85, 'Generating summary...', text, truncated);
 
       const summary = await summarize(text);
 

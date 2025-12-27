@@ -126,13 +126,14 @@ export async function extractTikTokMetadata(url: string): Promise<TikTokMetadata
       const metadata = JSON.parse(stdout);
 
       // Extract hashtags from description
-      const hashtags = extractHashtags(metadata.description || '');
-      const mentions = extractMentions(metadata.description || '');
+      const fullDescription = metadata.description || metadata.title || metadata.fulltitle || '';
+      const hashtags = extractHashtags(fullDescription);
+      const mentions = extractMentions(fullDescription);
 
       // Normalize metadata to our format
       const normalized: TikTokMetadata = {
-        title: metadata.title || metadata.fulltitle || 'TikTok Video',
-        description: metadata.description || '',
+        title: extractShortTitle(metadata.title || metadata.fulltitle || fullDescription),
+        description: fullDescription,
         duration: metadata.duration || 0,
         uploadDate: metadata.upload_date || '',
         timestamp: metadata.timestamp || Date.now() / 1000,
@@ -269,13 +270,14 @@ async function extractMetadataViaAPI(url: string): Promise<TikTokMetadata> {
 
     const video = data.data;
 
-    // Extract hashtags from title
-    const hashtags = extractHashtags(video.title || '');
-    const mentions = extractMentions(video.title || '');
+    // Extract hashtags from title (full description)
+    const fullDescription = video.title || '';
+    const hashtags = extractHashtags(fullDescription);
+    const mentions = extractMentions(fullDescription);
 
     return {
-      title: video.title || 'TikTok Video',
-      description: video.title || '',
+      title: extractShortTitle(fullDescription),
+      description: fullDescription,
       duration: video.duration || 0,
       uploadDate: video.create_time ? formatTimestampToDate(video.create_time) : '',
       timestamp: video.create_time || Date.now() / 1000,
@@ -342,6 +344,35 @@ async function extractMetadataViaAPI(url: string): Promise<TikTokMetadata> {
 function extractVideoId(url: string): string {
   const match = url.match(/\/video\/(\d+)/);
   return match ? match[1] : url.split('/').pop() || 'unknown';
+}
+
+/**
+ * Extract a short, usable title from description (first sentence/line, max 80 chars)
+ */
+function extractShortTitle(description: string): string {
+  if (!description || description.length === 0) {
+    return 'TikTok Video';
+  }
+
+  // Remove common TikTok markdown/formatting
+  let cleaned = description.trim();
+
+  // Try to get first sentence (up to period, exclamation, or question mark)
+  const sentenceMatch = cleaned.match(/^([^.!?]+[.!?])/);
+  if (sentenceMatch) {
+    cleaned = sentenceMatch[1].trim();
+  } else {
+    // Try to get first line
+    const firstLine = cleaned.split('\n')[0].trim();
+    cleaned = firstLine;
+  }
+
+  // Limit to reasonable length (80 chars max)
+  if (cleaned.length > 80) {
+    cleaned = cleaned.substring(0, 77) + '...';
+  }
+
+  return cleaned || 'TikTok Video';
 }
 
 /**

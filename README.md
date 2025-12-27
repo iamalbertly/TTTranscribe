@@ -23,12 +23,15 @@ TTTranscribe is a production-ready TikTok transcription service that provides st
 
 ## Features
 
+- **⚡ Instant Cache Response**: Sub-second responses for previously transcribed videos (48-hour cache)
 - **🚀 Fast API**: Accepts transcription requests and returns immediately with a request ID
+- **🎬 Rich Metadata**: Extracts video titles, author info, thumbnails, view/like counts, hashtags
+- **🖼️ Thumbnail Support**: Downloads and converts thumbnails to base64 for instant display
 - **🔐 JWT Authentication**: Secure token-based authentication with expiration and audit trails
 - **🔄 Poll-First Architecture**: Primary status polling with optional webhooks (no silent failures)
 - **💬 Progressive Status Messages**: User-friendly messages at each processing phase
 - **💰 Cost Transparency**: Upfront cost estimation with cache hit = free indicator
-- **📊 Status Tracking**: Real-time status updates with phase progression
+- **📊 Real-time Progress**: Optimistic progress updates for responsive user experience
 - **🎵 TikTok Support**: Handles TikTok URLs with redirect resolution and audio extraction
 - **🤖 Local Whisper**: Uses openai-whisper for reliable, offline transcription (with HF API fallback)
 - **📝 Structured Logging**: Consistent log format for monitoring and debugging
@@ -85,10 +88,23 @@ Get the current status of a transcription job.
     "processingTime": 225
   },
   "metadata": {
-    "title": "TikTok Video Title",
-    "author": "username",
-    "description": "Video description",
-    "url": "https://www.tiktok.com/@user/video/1234567890"
+    "title": "Short, readable video title (80 chars max).",
+    "author": "@username",
+    "authorDisplayName": "Display Name",
+    "description": "Full video description with hashtags",
+    "url": "https://www.tiktok.com/@user/video/1234567890",
+    "thumbnail": "https://thumbnail-url.com/image.jpg",
+    "thumbnailBase64": "data:image/jpeg;base64,...",
+    "viewCount": 1234567,
+    "likeCount": 98765,
+    "commentCount": 543,
+    "uploadDate": "20250127",
+    "relativeTime": "2 days ago",
+    "hashtags": ["trending", "viral"],
+    "music": {
+      "title": "original sound",
+      "author": "Artist Name"
+    }
   }
 }
 ```
@@ -325,11 +341,16 @@ src/
 
 ## Status Flow
 
-1. **REQUEST_SUBMITTED** (5%) - Job queued
-2. **DOWNLOADING** (15%) - Fetching TikTok audio
-3. **TRANSCRIBING** (35%) - Running ASR
-4. **SUMMARIZING** (75%) - Generating summary
-5. **COMPLETED** (100%) - Job finished with text
+1. **REQUEST_SUBMITTED** (0-5%) - Job queued and metadata extraction starting
+2. **DOWNLOADING** (5-30%) - Preparing download → Downloading audio → Audio downloaded
+3. **TRANSCRIBING** (40-70%) - Starting transcription → Transcribing → Finalizing
+4. **SUMMARIZING** (85-95%) - Generating summary
+5. **COMPLETED** (100%) - Job finished with transcript and metadata
+
+**Optimizations:**
+- Metadata extracted in parallel with audio download
+- Optimistic progress updates for responsive UX
+- Instant cache hits return immediately (sub-second response)
 
 ## Error Handling
 
