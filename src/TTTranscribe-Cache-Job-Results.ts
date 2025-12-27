@@ -18,8 +18,21 @@ export interface CachedJobResult {
   metadata: {
     title?: string;
     author?: string;
+    authorDisplayName?: string;
     description?: string;
     url: string;
+    thumbnail?: string;
+    thumbnailBase64?: string;
+    viewCount?: number;
+    likeCount?: number;
+    commentCount?: number;
+    uploadDate?: string;
+    relativeTime?: string;
+    hashtags?: string[];
+    music?: {
+      title?: string;
+      author?: string;
+    };
   };
   cachedAt: string;
   expiresAt: string;
@@ -98,8 +111,18 @@ class JobResultCache {
       metadata: {
         title: metadata.title,
         author: metadata.author,
+        authorDisplayName: metadata.authorDisplayName,
         description: metadata.description,
-        url: metadata.url
+        url: metadata.url,
+        thumbnail: metadata.thumbnail,
+        thumbnailBase64: metadata.thumbnailBase64,
+        viewCount: metadata.viewCount,
+        likeCount: metadata.likeCount,
+        commentCount: metadata.commentCount,
+        uploadDate: metadata.uploadDate,
+        relativeTime: metadata.relativeTime,
+        hashtags: metadata.hashtags,
+        music: metadata.music
       },
       cachedAt: now.toISOString(),
       expiresAt: expiresAt.toISOString()

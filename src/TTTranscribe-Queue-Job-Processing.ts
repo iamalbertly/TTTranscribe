@@ -6,6 +6,7 @@ import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 import { sendWebhookToBusinessEngine, calculateUsage } from './TTTranscribe-Webhook-Business-Engine';
 import { getAudioDuration, getModelUsed } from './TTTranscribe-Audio-Utils';
 import { TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
+import { extractTikTokMetadata, downloadThumbnail, thumbnailToBase64, type TikTokMetadata } from './TTTranscribe-Media-TikTok-Metadata';
 
 // Fixed status phases as per requirements
 export type StatusPhase =
@@ -51,8 +52,21 @@ export type Status = {
   metadata?: {
     title?: string;
     author?: string;
+    authorDisplayName?: string;
     description?: string;
     url: string;
+    thumbnail?: string;
+    thumbnailBase64?: string;
+    viewCount?: number;
+    likeCount?: number;
+    commentCount?: number;
+    uploadDate?: string;
+    relativeTime?: string;
+    hashtags?: string[];
+    music?: {
+      title?: string;
+      author?: string;
+    };
   };
   // Server-side debug information included in status for easier client-side reporting
   server?: {
@@ -335,6 +349,22 @@ function truncateTextIfNeeded(text: string, maxLength: number): { text: string; 
   };
 }
 
+/**
+ * Get user-friendly relative time from Unix timestamp
+ */
+function getRelativeTimeFromTimestamp(timestamp: number): string {
+  const now = Date.now() / 1000;
+  const diff = now - timestamp;
+
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)} days ago`;
+  if (diff < 2592000) return `${Math.floor(diff / 604800)} weeks ago`;
+  if (diff < 31536000) return `${Math.floor(diff / 2592000)} months ago`;
+  return `${Math.floor(diff / 31536000)} years ago`;
+}
+
 export async function startJob(url: string, businessEngineRequestId?: string): Promise<string> {
   // Lightweight normalization to improve cache hits and consistency
   const normalizedUrl = (() => {
@@ -423,8 +453,20 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
   // Fire-and-forget async processing
   (async () => {
     const startTime = Date.now();
+    let richMetadata: TikTokMetadata | null = null;
 
     try {
+      // Phase 0: Extract metadata (non-blocking, before download)
+      // This runs in parallel with early status updates and doesn't delay processing
+      try {
+        console.log(`[metadata] Extracting metadata for ${normalizedUrl}`);
+        richMetadata = await extractTikTokMetadata(normalizedUrl);
+        console.log(`[metadata] Successfully extracted: ${richMetadata.title} by ${richMetadata.author}`);
+      } catch (metadataError: any) {
+        console.warn(`[metadata] Failed to extract metadata: ${metadataError.message} - continuing with generic metadata`);
+        // Continue processing even if metadata extraction fails
+      }
+
       // Phase 1: Downloading
       updateStatus(id, 'DOWNLOADING', 15, 'Downloading audio');
 
@@ -569,12 +611,47 @@ export async function startJob(url: string, businessEngineRequestId?: string): P
         processingTime: Math.round((Date.now() - startTime) / 1000)
       };
 
-      const metadata = {
+      // Build metadata from rich extraction or fallback to generic
+      let metadata = richMetadata ? {
+        url: url,
+        title: richMetadata.title,
+        author: richMetadata.author,
+        authorDisplayName: richMetadata.authorDisplayName,
+        description: richMetadata.description,
+        thumbnail: richMetadata.thumbnail,
+        thumbnailBase64: undefined as string | undefined,
+        viewCount: richMetadata.viewCount,
+        likeCount: richMetadata.likeCount,
+        commentCount: richMetadata.commentCount,
+        uploadDate: richMetadata.uploadDate,
+        relativeTime: richMetadata.timestamp ? getRelativeTimeFromTimestamp(richMetadata.timestamp) : undefined,
+        hashtags: richMetadata.hashtags,
+        music: richMetadata.music
+      } : {
         url: url,
         title: 'TikTok Video',
-        author: 'unknown',
+        author: 'TikTok User',
+        authorDisplayName: 'TikTok User',
         description: 'Transcribed TikTok video'
       };
+
+      // Optional: Download and convert thumbnail to base64 if available
+      if (richMetadata?.thumbnail && config?.baseUrl) {
+        try {
+          const thumbnailDir = process.env.THUMBNAIL_DIR || '/tmp/thumbnails';
+          await fs.promises.mkdir(thumbnailDir, { recursive: true });
+          const thumbnailPath = await downloadThumbnail(richMetadata.thumbnail, thumbnailDir, richMetadata.videoId);
+          metadata.thumbnailBase64 = await thumbnailToBase64(thumbnailPath);
+          console.log(`[metadata] Downloaded and converted thumbnail to base64 (${metadata.thumbnailBase64.length} chars)`);
+          // Cleanup thumbnail file after conversion
+          try {
+            await fs.promises.unlink(thumbnailPath);
+          } catch {}
+        } catch (thumbError: any) {
+          console.warn(`[metadata] Failed to download/convert thumbnail: ${thumbError.message}`);
+          // Continue without thumbnail base64
+        }
+      }
 
       updateStatus(id, 'COMPLETED', 100, summary, text, truncated, result, metadata, false);
 
