@@ -30,10 +30,10 @@ if (-not $SecretValue) {
 
 Write-Host "🔐 Configuring authentication for Hugging Face Space: $SpaceId" -ForegroundColor Cyan
 
-# Check if huggingface-cli is installed (implies huggingface_hub is installed)
-if (-not (Get-Command "huggingface-cli" -ErrorAction SilentlyContinue)) {
-    Write-Error "❌ huggingface-cli is not installed or not in PATH."
-    Write-Host "👉 Please install it: pip install huggingface-hub"
+# Check if the modern Hugging Face CLI is installed.
+if (-not (Get-Command "hf" -ErrorAction SilentlyContinue)) {
+    Write-Error "❌ hf is not installed or not in PATH."
+    Write-Host "👉 Please install it: curl -LsSf https://hf.co/cli/install.sh | bash -s"
     exit 1
 }
 

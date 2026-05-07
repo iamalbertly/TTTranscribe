@@ -12,7 +12,7 @@
 const fetch = require('node-fetch');
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8788';
-const AUTH_SECRET = process.env.ENGINE_SHARED_SECRET || 'hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU';
+const AUTH_SECRET = process.env.ENGINE_SHARED_SECRET || 'engine-shared-secret-Yf9pR3kLx2tN6vQ4mC1aS8bE5wG7zH0jU9rK3dP6qT1nV8xL4fZ2yM7cJ5aB9eR';
 const TEST_TIKTOK_URL = 'https://www.tiktok.com/@thesunnahguy/video/7493203244727012630';
 
 // Test configuration
@@ -63,6 +63,17 @@ async function submitJob(url) {
   }
 
   return await response.json();
+}
+
+async function postTranscribe(url) {
+  return await fetch(`${BASE_URL}/transcribe`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Engine-Auth': AUTH_SECRET
+    },
+    body: JSON.stringify({ url })
+  });
 }
 
 /**
@@ -167,6 +178,29 @@ async function testShortTitleExtraction() {
       'Short title extraction test',
       error.message
     );
+    return false;
+  }
+}
+
+async function testBadUrlRejectedBeforeJob() {
+  console.log('\n🛑 Test 0: Bad URL Rejected Before Job');
+  const badUrl = 'https://vt.tiktok.com/ZS9bDyvc5/https://vt.tiktok.com/ZS9bDyvc5/';
+  try {
+    const response = await postTranscribe(badUrl);
+    assert(
+      response.status === 400,
+      'Concatenated TikTok URL is rejected with 400',
+      `Expected 400 for bad URL, got ${response.status}`
+    );
+    const body = await response.json();
+    assert(
+      body.error === 'invalid_url',
+      'Rejected URL returns invalid_url without creating a job',
+      `Expected invalid_url, got ${body.error}`
+    );
+    return true;
+  } catch (error) {
+    assert(false, 'Bad URL rejection test', error.message);
     return false;
   }
 }
@@ -304,6 +338,7 @@ async function runTests() {
 
   try {
     // Run tests sequentially
+    await testBadUrlRejectedBeforeJob();
     await testShortTitleExtraction();
     await testMetadataDoesNotBlock();
     await testRichMetadataFields();

@@ -283,6 +283,12 @@ TTTranscribe implements intelligent caching to improve performance and reduce pr
 - **Cache Miss**: Processes normally through all phases
 - **Cache Stats**: Available in health endpoint response
 
+## Reliability Contracts
+
+- `/health` returns `degraded` with `Retry-After` when required secrets/readiness checks are missing.
+- `/status/:id` and `/ttt/status/:id` are not rate limited, so Business Engine/mobile polling does not get blocked while a job is active.
+- Malformed or concatenated TikTok URLs return 400 before any job, cache, webhook, or ASR work is created.
+
 ## Secret Management
 
 ### Hugging Face Spaces Deployment
@@ -290,11 +296,11 @@ TTTranscribe implements intelligent caching to improve performance and reduce pr
 Use the provided script to set secrets programmatically:
 
 ```bash
-# Install huggingface-cli
-pip install huggingface-hub
+# Install the modern Hugging Face CLI
+curl -LsSf https://hf.co/cli/install.sh | bash -s
 
 # Login to Hugging Face
-huggingface-cli login
+hf auth login
 
 # Set secrets using PowerShell script
 .\scripts\setup-hf-secrets.ps1 -HfApiKey "your-hf-api-key" -EngineSecret "hf_sUP3rL0nGrANd0mAp1K3yV4xYb2pL6nM8zJ9fQ1cD5eS7tT0rW3gU"

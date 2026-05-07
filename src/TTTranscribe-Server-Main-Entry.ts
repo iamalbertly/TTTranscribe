@@ -4,6 +4,7 @@ import { startJob, getStatus, initializeJobProcessing } from './TTTranscribe-Que
 import { initializeConfig, TTTranscribeConfig } from './TTTranscribe-Config-Environment-Settings';
 import { jobResultCache } from './TTTranscribe-Cache-Job-Results';
 import { isValidTikTokUrl } from './TTTranscribe-Media-TikTok-Download';
+import { extractMetadataViaAPI } from './TTTranscribe-Media-TikTok-Metadata';
 import fetch from 'node-fetch';
 import { getWebhookQueueStats, getFailedWebhooks, retryFailedWebhook } from './TTTranscribe-Webhook-Business-Engine';
 import jwt from 'jsonwebtoken';
@@ -285,7 +286,7 @@ async function authMiddleware(c: any, next: any) {
  */
 async function rateLimitMiddleware(c: any, next: any) {
   // Skip rate limiting for health checks, root endpoint, and status checks
-  if (c.req.path === '/health' || c.req.path === '/' || c.req.path.startsWith('/status')) {
+  if (c.req.path === '/health' || c.req.path === '/' || c.req.path.startsWith('/status') || c.req.path.startsWith('/ttt/status')) {
     await next();
     return;
   }
@@ -330,7 +331,7 @@ async function rateLimitMiddleware(c: any, next: any) {
           tokensRemaining: Math.floor(limiter.getTokensRemaining())
         }
       }
-    }, 429);
+    }, 429, { 'Retry-After': String(retryAfter) });
   }
 
   await next();
@@ -475,9 +476,28 @@ async function handleEstimate(c: any) {
       }, 400);
     }
 
-    // For now, return estimated cost based on average TikTok video length (30-60 seconds)
-    // In the future, we could use yt-dlp to fetch video metadata without downloading
-    const estimatedDurationSeconds = 45; // Average TikTok video length
+    let metadata: any = null;
+    try {
+      const extracted = await extractMetadataViaAPI(sanitizedUrl);
+      const hasUsefulMetadata = extracted.title !== 'TikTok Video' || extracted.author !== 'TikTok User';
+      if (hasUsefulMetadata) {
+        metadata = {
+          title: extracted.title,
+          author: extracted.author,
+          authorDisplayName: extracted.authorDisplayName,
+          description: extracted.description,
+          duration: extracted.duration,
+          handle: extracted.author,
+          thumbnail: extracted.thumbnail,
+          url: extracted.webpageUrl || sanitizedUrl,
+          videoId: extracted.videoId
+        };
+      }
+    } catch (metadataError: any) {
+      console.warn(`[estimate] metadata unavailable: ${metadataError.message}`);
+    }
+
+    const estimatedDurationSeconds = metadata?.duration || 45;
     const modelUsed = process.env.WHISPER_MODEL_SIZE || 'base';
 
     // Calculate estimated credits based on duration
@@ -488,6 +508,11 @@ async function handleEstimate(c: any) {
     return c.json({
       estimatedCredits,
       estimatedDurationSeconds,
+      duration: estimatedDurationSeconds,
+      metadata,
+      title: metadata?.title,
+      author: metadata?.author,
+      description: metadata?.description,
       modelUsed: `openai-whisper-${modelUsed}`,
       note: 'This is an estimate. Actual cost will be based on real audio duration.',
     });
@@ -576,7 +601,7 @@ app.get('/health', async (c) => {
   const refillRate = config?.rateLimitRefillPerMin ?? parseInt(process.env.RATE_LIMIT_REFILL_PER_MIN || '10');
 
   return c.json({
-    status: 'healthy',
+    status: readiness.ok ? 'healthy' : 'degraded',
     version: config.apiVersion,
     apiVersion: config.apiVersion,
     uptime: process.uptime(),
@@ -594,7 +619,9 @@ app.get('/health', async (c) => {
     readiness: {
       ok: readiness.ok,
       message: readiness.message,
-      missing: readiness.missing
+      missing: readiness.missing,
+      guidance: readiness.ok ? 'Ready' : 'Service waking. Retry shortly.',
+      retryAfterSeconds: readiness.ok ? 0 : 60
     },
     rateLimit: {
       capacityPerIp: capacity,
@@ -614,6 +641,9 @@ app.get('/health', async (c) => {
       port: config.port,
       tmpDir: config.tmpDir
     }
+  }, readiness.ok ? 200 : 503, {
+    'Cache-Control': 'public, max-age=20',
+    'Retry-After': readiness.ok ? '0' : '60'
   });
 });
 

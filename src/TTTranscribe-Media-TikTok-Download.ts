@@ -455,13 +455,14 @@ async function ensureValidAudio(filePath: string): Promise<void> {
  * Check if URL is a valid TikTok URL
  */
 export function isValidTikTokUrl(url: string): boolean {
+  const normalized = url.trim();
   const tiktokPatterns = [
-    /^https?:\/\/(www\.)?tiktok\.com\/@[\w.-]+\/video\/\d+/,
-    /^https?:\/\/vm\.tiktok\.com\/[\w]+/,
-    /^https?:\/\/vt\.tiktok\.com\/[\w]+/
+    /^https?:\/\/(www\.)?tiktok\.com\/@[\w.-]+\/video\/\d{8,}(?:[/?#][^\s]*)?$/,
+    /^https?:\/\/vm\.tiktok\.com\/[A-Za-z0-9]{6,}\/?(?:[?#][^\s]*)?$/,
+    /^https?:\/\/vt\.tiktok\.com\/[A-Za-z0-9]{6,}\/?(?:[?#][^\s]*)?$/
   ];
   
-  return tiktokPatterns.some(pattern => pattern.test(url));
+  return tiktokPatterns.some(pattern => pattern.test(normalized));
 }
 
 /**
